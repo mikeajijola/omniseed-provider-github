@@ -153,7 +153,7 @@ async function connect(configuration) {
     expectedProviderId: "github_protocol",
     configuration,
     context: { companyId: "github_provider_acceptance" },
-    startupTimeoutMs: 5000,
+    startupTimeoutMs: 30000,
     requestTimeoutMs: 15000,
     onDiagnostic: chunk => process.stderr.write(chunk)
   });

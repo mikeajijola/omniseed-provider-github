@@ -1,0 +1,135 @@
+{
+  "evidenceVersion": "1",
+  "runId": "acceptance-20260810-01",
+  "startedAt": "2026-08-10T20:01:06.599Z",
+  "completedAt": "2026-08-10T20:02:37.421Z",
+  "target": {
+    "repository": "mikeajijola/omniseed-provider-github-sandbox",
+    "repositoryUrl": "https://github.com/mikeajijola/omniseed-provider-github-sandbox",
+    "baseBranch": "main",
+    "baseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+    "branchProtection": {
+      "enabled": false
+    }
+  },
+  "governedChange": {
+    "capability": "software.change.manage",
+    "provider": "github_protocol",
+    "planId": "plan_47d797a70a258a89",
+    "planHash": "47d797a70a258a8909c0017dc37ff40a7c67eea81bdb618b0db5499ed620411f",
+    "approval": {
+      "actorId": "acceptance_owner",
+      "approvedActionIds": [
+        "action_8680c9cf8d12"
+      ],
+      "approvedAt": "2026-08-10T20:01:23.211Z"
+    },
+    "createdBranch": "omniseed/acceptance-20260810-01-success",
+    "commitSha": "7b846179fc7d89de3b4f8a3be538929cba93a7d0",
+    "pullRequestNumber": 1,
+    "pullRequestUrl": "https://github.com/mikeajijola/omniseed-provider-github-sandbox/pull/1",
+    "observedChecks": {
+      "state": "pending",
+      "total": 0,
+      "runs": []
+    },
+    "mergeability": true,
+    "mergeableState": "clean",
+    "appliedAt": "2026-08-10T20:01:33.285187Z",
+    "observedAt": "2026-08-10T20:01:58.606834Z"
+  },
+  "lifecycleEvidence": {
+    "capabilityBefore": "missing",
+    "capabilityAfter": "realised",
+    "capabilityAfterReconnectAndReconcile": "realised",
+    "persisted": {
+      "version": 3,
+      "deployed": 1,
+      "observed": 1,
+      "evidence": 1,
+      "evidenceRecord": {
+        "type": "software_change_state",
+        "source": "github_protocol",
+        "repository": "mikeajijola/omniseed-provider-github-sandbox",
+        "baseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+        "currentBaseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+        "branch": "omniseed/acceptance-20260810-01-success",
+        "commitSha": "7b846179fc7d89de3b4f8a3be538929cba93a7d0",
+        "pullRequestNumber": 1,
+        "pullRequestUrl": "https://github.com/mikeajijola/omniseed-provider-github-sandbox/pull/1",
+        "checks": {
+          "state": "pending",
+          "total": 0,
+          "runs": []
+        },
+        "mergeability": true,
+        "mergeableState": "clean",
+        "drift": false,
+        "observedAt": "2026-08-10T20:01:41.602706Z",
+        "family": "systems",
+        "resourceId": "github_software_change"
+      }
+    },
+    "postChangeSnapshot": {
+      "repository": "mikeajijola/omniseed-provider-github-sandbox",
+      "repositoryUrl": "https://github.com/mikeajijola/omniseed-provider-github-sandbox",
+      "defaultBranch": "main",
+      "baseBranch": "main",
+      "baseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+      "branchProtection": {
+        "enabled": false
+      },
+      "openPullRequests": [
+        {
+          "number": 1,
+          "url": "https://github.com/mikeajijola/omniseed-provider-github-sandbox/pull/1",
+          "head": "omniseed/acceptance-20260810-01-success",
+          "base": "main"
+        }
+      ],
+      "branch": "omniseed/acceptance-20260810-01-success",
+      "commitSha": "7b846179fc7d89de3b4f8a3be538929cba93a7d0",
+      "pullRequest": {
+        "number": 1,
+        "url": "https://github.com/mikeajijola/omniseed-provider-github-sandbox/pull/1",
+        "state": "open",
+        "mergeable": true,
+        "mergeableState": "clean",
+        "headSha": "7b846179fc7d89de3b4f8a3be538929cba93a7d0",
+        "baseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde"
+      },
+      "checks": {
+        "state": "pending",
+        "total": 0,
+        "runs": []
+      },
+      "observedAt": "2026-08-10T20:02:06.588672Z"
+    }
+  },
+  "externalDriftTest": {
+    "planId": "plan_24d378e514abee9b",
+    "planHash": "24d378e514abee9baf8cbb7010275960a2ab920cbacbc6b69a27f23f261b767b",
+    "approvedAt": "2026-08-10T20:02:22.521Z",
+    "expectedBaseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+    "externalCommitSha": "f41d3cc9d92cdd710c0cf0f7f812f7411a07061f",
+    "actualBaseSha": "f41d3cc9d92cdd710c0cf0f7f812f7411a07061f",
+    "detectedDrift": {
+      "code": "external_drift",
+      "message": "Base branch changed after the approved action was created",
+      "expectedBaseSha": "49f34f7e57edc1dbc05c6d401beff0d60a1adfde",
+      "actualBaseSha": "f41d3cc9d92cdd710c0cf0f7f812f7411a07061f"
+    },
+    "applyFailure": {
+      "code": "provider_rejected",
+      "message": "Provider rejected github_software_change",
+      "details": {}
+    },
+    "canonicalStateAfterRejectedApply": {
+      "version": 1,
+      "deployed": 0,
+      "observed": 0,
+      "evidence": 0,
+      "planStatus": "pending"
+    }
+  }
+}
