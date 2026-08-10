@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseOmniform } from "../../omniform/src/index.js";
-import { connectStdioProvider, JsonStateStore, OmniSeed, ProviderRegistry } from "../../omniseed/src/index.js";
+import { parseOmniform } from "../../omniseed-ecosystem/omniform/src/index.js";
+import { connectStdioProvider, JsonStateStore, OmniSeed, ProviderRegistry } from "../../omniseed-ecosystem/omniseed/src/index.js";
 
 if (process.env.OMNISEED_GITHUB_LIVE !== "1") throw new Error("Set OMNISEED_GITHUB_LIVE=1 to authorize sandbox mutation");
 
@@ -227,4 +227,3 @@ function parseArgs(values) {
   }
   return result;
 }
-
