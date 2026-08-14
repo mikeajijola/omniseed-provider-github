@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omniseed.org/providers/github/configuration-v1.json",
+  "title": "GitHub Software Change Provider Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repository",
+    "branch",
+    "fixturePath",
+    "fixtureContent",
+    "commitMessage",
+    "pullRequestTitle"
+  ],
+  "properties": {
+    "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+    "baseBranch": { "type": "string", "minLength": 1, "default": "main" },
+    "expectedBaseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "branch": { "type": "string", "minLength": 1 },
+    "fixturePath": { "type": "string", "minLength": 1 },
+    "fixtureContent": { "type": "string" },
+    "commitMessage": { "type": "string", "minLength": 1 },
+    "pullRequestTitle": { "type": "string", "minLength": 1 },
+    "pullRequestBody": { "type": "string" }
+  }
+}
