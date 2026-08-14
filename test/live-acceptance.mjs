@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseOmniform } from "../../omniseed-ecosystem/omniform/src/index.js";
@@ -18,6 +18,13 @@ const providerScript = resolve(root, "provider/github_provider.py");
 const python = process.env.PYTHON ?? "python3";
 const owner = { actorId: "acceptance_owner", permissions: ["plan.create", "plan.approve", "plan.apply", "state.reconcile"] };
 const startedAt = new Date().toISOString();
+
+// A run ID names immutable evidence and isolated engine state. Refuse reuse before
+// observing or mutating the sandbox so an old successful run cannot be overwritten.
+for (const path of [resolve(root, `evidence/runs/${runId}.json`), resolve(root, `.acceptance-state/${runId}-success.json`), resolve(root, `.acceptance-state/${runId}-drift.json`)]) {
+  try { await access(path); throw new Error(`Acceptance run ID already exists: ${runId}. Choose a new --run-id.`); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+}
 
 const successConfig = changeConfig({ repository, runId, label: "success" });
 let provider = await connect(successConfig);
@@ -207,6 +214,9 @@ function commitDirectlyToBase({ repository, baseBranch, expectedBaseSha, path, c
 function assertEvidence(value) {
   if (!value.target.repository || !value.target.baseSha) throw new Error("Evidence lacks target repository/base SHA");
   for (const field of ["createdBranch", "commitSha", "pullRequestNumber", "pullRequestUrl", "observedChecks", "observedAt"]) if (value.governedChange[field] === undefined || value.governedChange[field] === null) throw new Error(`Evidence lacks governedChange.${field}`);
+  if (!value.governedChange.approval.approvedActionIds.length) throw new Error("Evidence lacks an approved governed action");
+  if (value.lifecycleEvidence.capabilityBefore !== "missing" || value.lifecycleEvidence.capabilityAfter !== "realised" || value.lifecycleEvidence.capabilityAfterReconnectAndReconcile !== "realised") throw new Error("Provider lifecycle did not move from missing to realised and remain realised after reconnect");
+  if (value.lifecycleEvidence.persisted.deployed < 1 || value.lifecycleEvidence.persisted.observed < 1 || value.lifecycleEvidence.persisted.evidence < 1) throw new Error("Provider lifecycle was not persisted with observation evidence");
   if (!value.externalDriftTest.detectedDrift || value.externalDriftTest.canonicalStateAfterRejectedApply.deployed !== 0) throw new Error("External drift was not detected safely");
 }
 

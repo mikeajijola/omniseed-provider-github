@@ -21,6 +21,8 @@ The Provider can:
 
 It maps those behaviors to the unchanged Provider Protocol v1 methods: initialize, status, validate, plan, apply, observe, invoke, and shutdown.
 
+[`provider-package.json`](provider-package.json) is the static discovery claim. It describes what this package can support; it does not claim that the Provider is installed, configured, connected, healthy, or capable for a particular company.
+
 ## What it does not do
 
 It does not merge PRs, install itself, discover Providers, change protocol v1, or expose GitHub-specific methods to OmniSeed. It does not touch production repositories in acceptance tests.
@@ -44,4 +46,4 @@ OMNISEED_GITHUB_LIVE=1 npm run acceptance -- \
 ```
 
 Each run writes exact external evidence to `evidence/latest.json` and `evidence/runs/<run-id>.json`.
-
+Run IDs are immutable and cannot be reused. This prevents a dirty local state or repeated sandbox branch from overwriting earlier acceptance evidence.

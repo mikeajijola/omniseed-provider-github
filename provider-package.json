@@ -1,0 +1,20 @@
+{
+  "manifestVersion": "1.0",
+  "id": "github_protocol",
+  "version": "0.1.0-alpha.0",
+  "engineCompatibility": "omniseed.provider.protocol/1.0",
+  "primitiveFamilies": ["systems"],
+  "operations": [
+    "software.change.observe",
+    "software.change.status",
+    "software.change.evidence"
+  ],
+  "configurationSchema": "./provider-configuration.schema.json",
+  "observationTypes": ["software_change_state"],
+  "evidenceTypes": ["software_change_state"],
+  "permissions": [
+    "github.repository.read",
+    "github.contents.write",
+    "github.pull_request.write"
+  ]
+}
