@@ -2,11 +2,13 @@
 """Narrow GitHub Provider for OmniSeed Provider Protocol v1."""
 
 import datetime
+import base64
 import json
 import os
 import subprocess
 import sys
 import time
+import urllib.parse
 
 PROTOCOL = "omniseed.provider.protocol/1.0"
 METHODS = [
@@ -15,7 +17,7 @@ METHODS = [
 ]
 OPERATIONS = [
     "software.change.observe", "software.change.status", "software.change.evidence",
-    "company.repository.inspect"
+    "company.repository.inspect", "company.change.merge"
 ]
 
 
@@ -98,7 +100,7 @@ class GitHubProvider:
         }
         return {
             "protocolVersion": PROTOCOL,
-            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.2"},
+            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.3"},
             "primitiveFamilies": ["workflows"],
             "offerings": [{"family": "workflows", "id": "software_change_manage", "resource": resource}],
             "operations": OPERATIONS,
@@ -273,6 +275,8 @@ class GitHubProvider:
         if operation not in OPERATIONS:
             raise GitHubError("Unsupported capability operation", {"operation": operation})
         attributes = input_value or {}
+        if operation == "company.change.merge":
+            return self.merge_company_change(attributes, actor or {})
         if operation == "company.repository.inspect":
             requested_repository = attributes.get("repository", self.repository)
             requested_branch = attributes.get("baseBranch", self.base_branch)
@@ -280,11 +284,49 @@ class GitHubProvider:
                 raise GitHubError("Repository inspection is outside configured Provider scope", {
                     "repository": requested_repository, "baseBranch": requested_branch
                 })
-            return self.observe_repository()
+            result = self.observe_repository()
+            path = attributes.get("path")
+            if path:
+                encoded_path = urllib.parse.quote(path, safe="/")
+                document = self.client.api(f"repos/{self.repository}/contents/{encoded_path}?ref={urllib.parse.quote(self.base_branch, safe='')}")
+                if document.get("encoding") != "base64" or not isinstance(document.get("content"), str):
+                    raise GitHubError("Canonical company document is not a base64 Git blob", {"path": path})
+                result["document"] = {"path": path, "sha": document.get("sha"), "content": base64.b64decode(document["content"]).decode("utf-8")}
+            return result
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         if operation == "software.change.evidence":
             return {"repository": self.repository, "snapshot": snapshot, "requestedBy": (actor or {}).get("actorId")}
         return snapshot
+
+    def merge_company_change(self, attributes, actor):
+        permissions = actor.get("permissions") or []
+        if "company_change.merge" not in permissions:
+            raise GitHubError("Actor is not authorised to merge company changes", {"code": "insufficient_authority", "actorId": actor.get("actorId")})
+        pull_number = attributes.get("pullRequestNumber")
+        expected_head = attributes.get("expectedHeadSha")
+        if not isinstance(pull_number, int) or not expected_head:
+            raise GitHubError("Merge requires pullRequestNumber and expectedHeadSha", {"code": "invalid_merge_request"})
+        pull = self.client.api(f"repos/{self.repository}/pulls/{pull_number}")
+        if pull["head"]["sha"] != expected_head:
+            raise GitHubError("Pull request head changed after approval", {"code": "external_drift", "expectedHeadSha": expected_head, "actualHeadSha": pull["head"]["sha"]})
+        if pull.get("merged"):
+            return {"merged": True, "alreadyMerged": True, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": pull.get("merge_commit_sha"), "mergedAt": pull.get("merged_at")}
+        policy = self.configuration.get("mergePolicy") or {}
+        reviews = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/reviews")
+        approved_by = sorted({review["user"]["login"] for review in reviews if review.get("state") == "APPROVED" and review.get("user", {}).get("login")})
+        if policy.get("requireApproval", True) and not approved_by:
+            raise GitHubError("Pull request lacks a required approval", {"code": "approval_required", "pullRequestNumber": pull_number})
+        checks = self.client.api(f"repos/{self.repository}/commits/{expected_head}/check-runs")
+        status = self.client.api(f"repos/{self.repository}/commits/{expected_head}/status")
+        check_runs = checks.get("check_runs", [])
+        passing = status.get("state") == "success" and bool(check_runs) and all(item.get("status") == "completed" and item.get("conclusion") in ["success", "neutral", "skipped"] for item in check_runs)
+        check_evidence = {"state": status.get("state", "unknown"), "total": checks.get("total_count", 0), "runs": [{"name": item["name"], "status": item["status"], "conclusion": item.get("conclusion"), "url": item.get("html_url")} for item in check_runs]}
+        if policy.get("requirePassingChecks", True) and not passing:
+            raise GitHubError("Pull request checks are not passing", {"code": "checks_not_passing", "checks": check_evidence})
+        result = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/merge", "PUT", {"sha": expected_head, "merge_method": policy.get("mergeMethod", "squash")})
+        if not result.get("merged"):
+            raise GitHubError("GitHub did not merge the pull request", {"code": "merge_rejected", "message": result.get("message")})
+        return {"merged": True, "alreadyMerged": False, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": result.get("sha"), "mergedAt": now(), "approvedBy": approved_by, "checks": check_evidence, "mergedBy": actor.get("actorId")}
 
 
 def respond(request_id, result=None, error=None):
