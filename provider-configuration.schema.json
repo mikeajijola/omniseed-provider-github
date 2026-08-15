@@ -5,20 +5,18 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "repository",
-    "branch",
-    "fixturePath",
-    "fixtureContent",
-    "commitMessage",
-    "pullRequestTitle"
+    "repository"
   ],
   "properties": {
     "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
     "baseBranch": { "type": "string", "minLength": 1, "default": "main" },
     "expectedBaseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "branchPrefix": { "type": "string", "minLength": 1, "default": "omniseed/" },
     "branch": { "type": "string", "minLength": 1 },
-    "fixturePath": { "type": "string", "minLength": 1 },
-    "fixtureContent": { "type": "string" },
+    "path": { "type": "string", "minLength": 1 },
+    "content": { "type": "string" },
+    "fixturePath": { "type": "string", "minLength": 1, "deprecated": true },
+    "fixtureContent": { "type": "string", "deprecated": true },
     "commitMessage": { "type": "string", "minLength": 1 },
     "pullRequestTitle": { "type": "string", "minLength": 1 },
     "pullRequestBody": { "type": "string" }

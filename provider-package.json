@@ -1,13 +1,14 @@
 {
   "manifestVersion": "1.0",
   "id": "github_protocol",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
   "primitiveFamilies": ["workflows"],
   "operations": [
     "software.change.observe",
     "software.change.status",
-    "software.change.evidence"
+    "software.change.evidence",
+    "company.repository.inspect"
   ],
   "configurationSchema": "./provider-configuration.schema.json",
   "observationTypes": ["software_change_state"],
