@@ -2,11 +2,11 @@
 
 This is a narrow real-world test of OmniSeed Provider Protocol v1-alpha.
 
-It supplies one Company-as-Code capability:
+It supplies one narrow Provider realisation for the `workflows` primitive family, used by the Company Capability:
 
 `software.change.manage`
 
-GitHub is one possible realisation of that capability. The Provider does not define software change itself, and it is not a general GitHub API wrapper.
+GitHub is one possible realisation of the governed change/review workflow requirement composed by that capability. The Provider does not define software development itself, bind the Capability directly to GitHub, or act as a general GitHub API wrapper. It advertises only `workflows`: the implementation actually progresses a change through branch, commit, pull-request, and observed review/check states. Its observation and evidence methods support that workflow lifecycle; they do not claim a separately selectable `observations` implementation.
 
 ## What it does
 

@@ -1,9 +1,9 @@
 {
   "manifestVersion": "1.0",
   "id": "github_protocol",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
-  "primitiveFamilies": ["systems"],
+  "primitiveFamilies": ["workflows"],
   "operations": [
     "software.change.observe",
     "software.change.status",

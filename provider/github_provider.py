@@ -73,7 +73,7 @@ class GitHubProvider:
         observed = self.observe_repository() if self.repository else None
         expected = self.configuration.get("expectedBaseSha") or (observed or {}).get("baseSha")
         resource = {
-            "family": "systems",
+            "family": "workflows",
             "id": "github_software_change",
             "name": "GitHub Software Change",
             "offers": ["software_change_manage"],
@@ -92,9 +92,9 @@ class GitHubProvider:
         }
         return {
             "protocolVersion": PROTOCOL,
-            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.0"},
-            "primitiveFamilies": ["systems"],
-            "offerings": [{"family": "systems", "id": "software_change_manage", "resource": resource}],
+            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.1"},
+            "primitiveFamilies": ["workflows"],
+            "offerings": [{"family": "workflows", "id": "software_change_manage", "resource": resource}],
             "operations": OPERATIONS,
             "methods": METHODS
         }
@@ -130,7 +130,7 @@ class GitHubProvider:
         for field in required:
             if not spec.get(field):
                 issues.append({"code": "missing_field", "field": field, "message": f"{field} is required"})
-        if action.get("family") != "systems" or action.get("resourceId") != "github_software_change":
+        if action.get("family") != "workflows" or action.get("resourceId") != "github_software_change":
             issues.append({"code": "unsupported_action", "message": "Only the GitHub software change resource is supported"})
         if not issues:
             actual = self.base_sha()
