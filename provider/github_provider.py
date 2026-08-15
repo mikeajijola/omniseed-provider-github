@@ -13,7 +13,10 @@ METHODS = [
     "provider.initialize", "provider.status", "provider.validate", "provider.plan",
     "provider.apply", "provider.observe", "provider.invoke", "provider.shutdown"
 ]
-OPERATIONS = ["software.change.observe", "software.change.status", "software.change.evidence"]
+OPERATIONS = [
+    "software.change.observe", "software.change.status", "software.change.evidence",
+    "company.repository.inspect"
+]
 
 
 def now():
@@ -82,9 +85,12 @@ class GitHubProvider:
                 "repository": self.repository,
                 "baseBranch": self.base_branch,
                 "expectedBaseSha": expected,
+                "branchPrefix": self.configuration.get("branchPrefix", "omniseed/"),
+                # Optional action fields retain the alpha.1 generated-plan fixture path.
+                # Production Company Change supplies these fields in the exact approved action.
                 "branch": self.configuration.get("branch"),
-                "fixturePath": self.configuration.get("fixturePath"),
-                "fixtureContent": self.configuration.get("fixtureContent"),
+                "path": self.configuration.get("path") or self.configuration.get("fixturePath"),
+                "content": self.configuration.get("content") if "content" in self.configuration else self.configuration.get("fixtureContent"),
                 "commitMessage": self.configuration.get("commitMessage"),
                 "pullRequestTitle": self.configuration.get("pullRequestTitle"),
                 "pullRequestBody": self.configuration.get("pullRequestBody")
@@ -92,7 +98,7 @@ class GitHubProvider:
         }
         return {
             "protocolVersion": PROTOCOL,
-            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.1"},
+            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.2"},
             "primitiveFamilies": ["workflows"],
             "offerings": [{"family": "workflows", "id": "software_change_manage", "resource": resource}],
             "operations": OPERATIONS,
@@ -100,7 +106,7 @@ class GitHubProvider:
         }
 
     def status(self):
-        configured = bool(self.repository and self.configuration.get("branch") and self.configuration.get("fixturePath"))
+        configured = bool(self.repository and self.base_branch)
         connected = False
         healthy = False
         identity = None
@@ -126,12 +132,22 @@ class GitHubProvider:
     def validate(self, action):
         issues = []
         spec = ((action or {}).get("desired") or {}).get("spec") or {}
-        required = ["repository", "baseBranch", "expectedBaseSha", "branch", "fixturePath", "fixtureContent", "commitMessage", "pullRequestTitle"]
+        required = ["repository", "baseBranch", "expectedBaseSha", "branch", "path", "content", "commitMessage", "pullRequestTitle"]
         for field in required:
+            if field == "content" and field in spec:
+                continue
             if not spec.get(field):
                 issues.append({"code": "missing_field", "field": field, "message": f"{field} is required"})
-        if action.get("family") != "workflows" or action.get("resourceId") != "github_software_change":
-            issues.append({"code": "unsupported_action", "message": "Only the GitHub software change resource is supported"})
+        if action.get("family") != "workflows" or action.get("resourceId") not in ["github_software_change", "github_company_change"]:
+            issues.append({"code": "unsupported_action", "message": "Only a governed GitHub change workflow is supported"})
+        if spec.get("repository") != self.repository or spec.get("baseBranch") != self.base_branch:
+            issues.append({"code": "repository_scope_mismatch", "message": "Action repository and base branch must match Provider configuration"})
+        prefix = self.configuration.get("branchPrefix", "omniseed/")
+        if spec.get("branch") and not spec["branch"].startswith(prefix):
+            issues.append({"code": "branch_scope_mismatch", "message": f"Change branches must start with {prefix}"})
+        path = spec.get("path")
+        if path and (path.startswith("/") or ".." in path.split("/")):
+            issues.append({"code": "invalid_path", "message": "Change path must be repository-relative and cannot traverse parents"})
         if not issues:
             actual = self.base_sha()
             if actual != spec["expectedBaseSha"]:
@@ -156,7 +172,7 @@ class GitHubProvider:
         base_commit = self.client.api(f"repos/{repo}/git/commits/{base_sha}")
         tree = self.client.api(f"repos/{repo}/git/trees", "POST", {
             "base_tree": base_commit["tree"]["sha"],
-            "tree": [{"path": spec["fixturePath"], "mode": "100644", "type": "blob", "content": spec["fixtureContent"]}]
+            "tree": [{"path": spec["path"], "mode": "100644", "type": "blob", "content": spec["content"]}]
         })
         commit = self.client.api(f"repos/{repo}/git/commits", "POST", {
             "message": spec["commitMessage"], "tree": tree["sha"], "parents": [base_sha]
@@ -208,6 +224,8 @@ class GitHubProvider:
             "commitSha": target_sha,
             "pullRequest": None if not pull else {
                 "number": pull["number"], "url": pull["html_url"], "state": pull["state"],
+                "merged": bool(pull.get("merged")), "mergedAt": pull.get("merged_at"),
+                "mergeCommitSha": pull.get("merge_commit_sha"),
                 "mergeable": pull.get("mergeable"), "mergeableState": pull.get("mergeable_state"),
                 "headSha": pull["head"]["sha"], "baseSha": pull["base"]["sha"]
             },
@@ -222,7 +240,8 @@ class GitHubProvider:
     def observe(self, resource):
         attributes = resource.get("attributes") or {}
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
-        drift = snapshot["baseSha"] != attributes.get("expectedBaseSha")
+        merged = bool((snapshot.get("pullRequest") or {}).get("merged"))
+        drift = snapshot["baseSha"] != attributes.get("expectedBaseSha") and not merged
         evidence = {
             "type": "software_change_state",
             "source": "github_protocol",
@@ -236,6 +255,9 @@ class GitHubProvider:
             "checks": snapshot["checks"],
             "mergeability": (snapshot.get("pullRequest") or {}).get("mergeable"),
             "mergeableState": (snapshot.get("pullRequest") or {}).get("mergeableState"),
+            "merged": merged,
+            "mergedAt": (snapshot.get("pullRequest") or {}).get("mergedAt"),
+            "mergeCommitSha": (snapshot.get("pullRequest") or {}).get("mergeCommitSha"),
             "drift": drift,
             "observedAt": snapshot["observedAt"]
         }
@@ -251,6 +273,14 @@ class GitHubProvider:
         if operation not in OPERATIONS:
             raise GitHubError("Unsupported capability operation", {"operation": operation})
         attributes = input_value or {}
+        if operation == "company.repository.inspect":
+            requested_repository = attributes.get("repository", self.repository)
+            requested_branch = attributes.get("baseBranch", self.base_branch)
+            if requested_repository != self.repository or requested_branch != self.base_branch:
+                raise GitHubError("Repository inspection is outside configured Provider scope", {
+                    "repository": requested_repository, "baseBranch": requested_branch
+                })
+            return self.observe_repository()
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         if operation == "software.change.evidence":
             return {"repository": self.repository, "snapshot": snapshot, "requestedBy": (actor or {}).get("actorId")}

@@ -14,7 +14,7 @@ The Provider can:
 
 - observe a target repository, open pull requests, branch protection, and checks;
 - validate that an approved change still starts from the observed base commit;
-- create one branch and deterministic fixture commit;
+- create one branch and commit an exact engine-approved company-definition candidate;
 - open one pull request;
 - observe the resulting PR, commit, checks, mergeability, and evidence;
 - detect when the base branch changed after planning.
@@ -25,7 +25,7 @@ It maps those behaviors to the unchanged Provider Protocol v1 methods: initializ
 
 ## What it does not do
 
-It does not merge PRs, install itself, discover Providers, change protocol v1, or expose GitHub-specific methods to OmniSeed. It does not touch production repositories in acceptance tests.
+It does not merge PRs, install itself, discover Providers, change protocol v1, or expose a generic GitHub API to OmniSeed. Repository inspection and exact-file change submission remain scoped to the configured repository and the `workflows` family. It does not touch production repositories in acceptance tests.
 
 ## Authentication
 
