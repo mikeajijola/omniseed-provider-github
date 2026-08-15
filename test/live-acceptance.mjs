@@ -171,11 +171,11 @@ function company() {
 kind: Company
 metadata: { id: github_provider_acceptance, name: GitHub Provider Acceptance }
 spec:
-  providers: { systems: { provider: github_protocol } }
+  providers: { workflows: { provider: github_protocol } }
   capabilities:
     - id: software_change_manage
       name: Software Change Management
-      requires: [{ id: software_change_manage, primitiveFamily: systems }]
+      requires: [{ id: software_change_manage, primitiveFamily: workflows }]
   operations:
     - { id: get_capability, capability: software_change_manage, description: Inspect capability, input: {}, output: {}, mutation: false, permissions: [], approval: none, interfaces: [api, cli, agent, machine] }
 `);

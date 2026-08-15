@@ -38,13 +38,16 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github_protocol")
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.1")
+        self.assertEqual(result["primitiveFamilies"], ["workflows"])
+        self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
         self.assertEqual(result["offerings"][0]["resource"]["spec"]["expectedBaseSha"], "base-1")
 
     def test_validation_detects_external_base_drift(self):
         client = FakeClient("base-2")
         provider = MODULE.GitHubProvider(config(), client)
-        action = {"family": "systems", "resourceId": "github_software_change", "desired": {"spec": {**config(), "expectedBaseSha": "base-1"}}}
+        action = {"family": "workflows", "resourceId": "github_software_change", "desired": {"spec": {**config(), "expectedBaseSha": "base-1"}}}
         result = provider.validate(action)
         self.assertFalse(result["valid"])
         self.assertEqual(result["issues"][0]["code"], "external_drift")
