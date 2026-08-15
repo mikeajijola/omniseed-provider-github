@@ -1,4 +1,5 @@
 import importlib.util
+import base64
 import pathlib
 import unittest
 
@@ -41,6 +42,33 @@ class MutationClient(FakeClient):
         return super().api(endpoint, method, body, allow_failure)
 
 
+class MergeClient(FakeClient):
+    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False):
+        super().__init__()
+        self.approved = approved
+        self.check_state = checks
+        self.merged = merged
+        self.api_failure = api_failure
+        self.merge_calls = 0
+
+    def api(self, endpoint, method="GET", body=None, allow_failure=False):
+        if endpoint.endswith("pulls/7"):
+            return {"number": 7, "html_url": "https://github.com/example/sandbox/pull/7", "state": "closed" if self.merged else "open", "merged": self.merged, "merged_at": "2026-08-15T00:00:00Z" if self.merged else None, "merge_commit_sha": "merge-7" if self.merged else None, "mergeable": True, "mergeable_state": "clean", "head": {"sha": "head-7"}, "base": {"sha": "base-1"}}
+        if endpoint.endswith("pulls/7/reviews"):
+            return [{"state": "APPROVED", "user": {"login": "reviewer"}}] if self.approved else []
+        if endpoint.endswith("commits/head-7/check-runs"):
+            conclusion = None if self.check_state == "pending" else self.check_state
+            return {"total_count": 1, "check_runs": [{"name": "conformance", "status": "completed" if conclusion else "in_progress", "conclusion": conclusion, "html_url": "https://checks/1"}]}
+        if endpoint.endswith("commits/head-7/status"):
+            return {"state": self.check_state}
+        if endpoint.endswith("pulls/7/merge") and method == "PUT":
+            self.merge_calls += 1
+            if self.api_failure: raise MODULE.GitHubError("merge failed", {"status": 500})
+            self.merged = True
+            return {"merged": True, "sha": "merge-7", "message": "Pull Request successfully merged"}
+        return super().api(endpoint, method, body, allow_failure)
+
+
 def config():
     return {
         "repository": "example/sandbox", "baseBranch": "main", "branchPrefix": "omniseed/"
@@ -60,7 +88,7 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github_protocol")
-        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.2")
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.3")
         self.assertEqual(result["primitiveFamilies"], ["workflows"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
@@ -101,6 +129,16 @@ class ProviderTests(unittest.TestCase):
         with self.assertRaises(MODULE.GitHubError):
             provider.invoke("company.repository.inspect", {"repository": "example/other"}, {"actorId": "engine"})
 
+    def test_repository_inspection_returns_exact_canonical_document(self):
+        class DocumentClient(FakeClient):
+            def api(self, endpoint, method="GET", body=None, allow_failure=False):
+                if "/contents/omniform.yaml?ref=main" in endpoint:
+                    return {"sha": "blob-1", "encoding": "base64", "content": base64.b64encode(b"# canonical\nkind: Company\n").decode("ascii")}
+                return super().api(endpoint, method, body, allow_failure)
+        provider = MODULE.GitHubProvider(config(), DocumentClient())
+        result = provider.invoke("company.repository.inspect", {"repository": "example/sandbox", "baseBranch": "main", "path": "omniform.yaml"}, {"actorId": "engine"})
+        self.assertEqual(result["document"], {"path": "omniform.yaml", "sha": "blob-1", "content": "# canonical\nkind: Company\n"})
+
     def test_apply_writes_exact_approved_path_and_content(self):
         client = MutationClient()
         provider = MODULE.GitHubProvider(config(), client)
@@ -110,6 +148,49 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(tree_request[2]["tree"], [{"path": "omniform.yaml", "mode": "100644", "type": "blob", "content": "{}\n"}])
         self.assertEqual(result["attributes"]["commitSha"], "commit-new")
         self.assertEqual(result["attributes"]["pullRequestNumber"], 7)
+
+    def test_governed_merge_requires_actor_authority(self):
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient())
+        with self.assertRaises(MODULE.GitHubError) as raised:
+            provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "lily", "permissions": ["company_change.propose"]})
+        self.assertEqual(raised.exception.details["code"], "insufficient_authority")
+
+    def test_governed_merge_requires_approval(self):
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient(approved=False))
+        with self.assertRaises(MODULE.GitHubError) as raised:
+            provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(raised.exception.details["code"], "approval_required")
+
+    def test_governed_merge_rejects_failing_or_pending_checks(self):
+        for state in ["failure", "pending"]:
+            with self.subTest(state=state):
+                provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient(checks=state))
+                with self.assertRaises(MODULE.GitHubError) as raised:
+                    provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+                self.assertEqual(raised.exception.details["code"], "checks_not_passing")
+
+    def test_governed_merge_is_idempotent_when_already_merged(self):
+        client = MergeClient(merged=True)
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, client)
+        result = provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertTrue(result["merged"])
+        self.assertTrue(result["alreadyMerged"])
+        self.assertEqual(client.merge_calls, 0)
+
+    def test_governed_merge_returns_merge_evidence(self):
+        client = MergeClient()
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, client)
+        result = provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(result["mergeCommitSha"], "merge-7")
+        self.assertEqual(result["approvedBy"], ["reviewer"])
+        self.assertEqual(result["checks"]["state"], "success")
+        self.assertEqual(client.merge_calls, 1)
+
+    def test_governed_merge_propagates_api_failure_without_success_evidence(self):
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient(api_failure=True))
+        with self.assertRaises(MODULE.GitHubError) as raised:
+            provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(str(raised.exception), "merge failed")
 
 
 if __name__ == "__main__":

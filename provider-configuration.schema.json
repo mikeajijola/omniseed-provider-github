@@ -19,6 +19,15 @@
     "fixtureContent": { "type": "string", "deprecated": true },
     "commitMessage": { "type": "string", "minLength": 1 },
     "pullRequestTitle": { "type": "string", "minLength": 1 },
-    "pullRequestBody": { "type": "string" }
+    "pullRequestBody": { "type": "string" },
+    "mergePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requireApproval": { "type": "boolean", "default": true },
+        "requirePassingChecks": { "type": "boolean", "default": true },
+        "mergeMethod": { "enum": ["merge", "squash", "rebase"], "default": "squash" }
+      }
+    }
   }
 }
