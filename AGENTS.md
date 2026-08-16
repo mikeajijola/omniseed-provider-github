@@ -1,5 +1,9 @@
 # Working on the OmniSeed GitHub Provider
 
+- Provider organisation: GitHub.
+- Canonical Provider ID: `github` (legacy package/runtime IDs require a coordinated migration).
+- Products such as Repositories, Actions, Checks, Rulesets, and Apps/API are implementation choices beneath GitHub, never separate Providers.
+
 Protect the Capability boundary.
 
 - The Capability is `software.change.manage`.
@@ -14,4 +18,3 @@ Protect the Capability boundary.
 - Evidence must record repository, base SHA, branch, commit, PR identity, checks, timestamps, and drift.
 
 Run `npm test` before the live acceptance test. Keep this Provider deliberately narrow until real usage proves a missing abstraction.
-

@@ -1,5 +1,14 @@
 # OmniSeed GitHub Provider
 
+Provider declaration:
+
+- Supplying organisation: GitHub
+- Canonical Provider ID: `github`
+- Supported primitive families in this package: `workflows`
+- Products/features used: Repositories, Apps/API, pull requests, Checks, and Rulesets; GitHub Actions may supply workflow execution where selected
+
+GitHub Actions, Checks, Rulesets, Repositories, and Apps/API are not separate Providers. They are GitHub products/features used beneath the GitHub Provider. The authoritative distinction is defined by [ecosystem Provider semantics](https://github.com/mikeajijola/omniseed-ecosystem/blob/main/docs/provider-semantics.md).
+
 This is a narrow real-world test of OmniSeed Provider Protocol v1-alpha.
 
 It supplies one narrow Provider realisation for the `workflows` primitive family, used by the Company Capability:
