@@ -87,7 +87,7 @@ class ProviderTests(unittest.TestCase):
     def test_initialization_advertises_capability_semantics_and_observed_base(self):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
-        self.assertEqual(result["provider"]["id"], "github_protocol")
+        self.assertEqual(result["provider"]["id"], "github")
         self.assertEqual(result["provider"]["version"], "0.1.0-alpha.3")
         self.assertEqual(result["primitiveFamilies"], ["workflows"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")

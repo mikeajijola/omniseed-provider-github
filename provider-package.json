@@ -1,6 +1,6 @@
 {
   "manifestVersion": "1.0",
-  "id": "github_protocol",
+  "id": "github",
   "version": "0.1.0-alpha.3",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
   "primitiveFamilies": ["workflows"],
