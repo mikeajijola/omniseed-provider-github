@@ -43,12 +43,13 @@ class MutationClient(FakeClient):
 
 
 class MergeClient(FakeClient):
-    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False):
+    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False, legacy_statuses=None):
         super().__init__()
         self.approved = approved
         self.check_state = checks
         self.merged = merged
         self.api_failure = api_failure
+        self.legacy_statuses = legacy_statuses
         self.merge_calls = 0
 
     def api(self, endpoint, method="GET", body=None, allow_failure=False):
@@ -60,7 +61,8 @@ class MergeClient(FakeClient):
             conclusion = None if self.check_state == "pending" else self.check_state
             return {"total_count": 1, "check_runs": [{"name": "conformance", "status": "completed" if conclusion else "in_progress", "conclusion": conclusion, "html_url": "https://checks/1"}]}
         if endpoint.endswith("commits/head-7/status"):
-            return {"state": self.check_state}
+            statuses = self.legacy_statuses if self.legacy_statuses is not None else [{"context": "legacy", "state": self.check_state, "target_url": "https://status/1"}]
+            return {"state": self.check_state if statuses else "pending", "statuses": statuses}
         if endpoint.endswith("pulls/7/merge") and method == "PUT":
             self.merge_calls += 1
             if self.api_failure: raise MODULE.GitHubError("merge failed", {"status": 500})
@@ -168,6 +170,14 @@ class ProviderTests(unittest.TestCase):
                 with self.assertRaises(MODULE.GitHubError) as raised:
                     provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
                 self.assertEqual(raised.exception.details["code"], "checks_not_passing")
+
+    def test_governed_merge_accepts_successful_check_runs_without_legacy_status_contexts(self):
+        client = MergeClient(approved=False, checks="success", legacy_statuses=[])
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": False, "requirePassingChecks": True}}, client)
+        result = provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertTrue(result["merged"])
+        self.assertEqual(result["checks"]["total"], 1)
+        self.assertEqual(result["checks"]["legacyStatuses"], [])
 
     def test_governed_merge_is_idempotent_when_already_merged(self):
         client = MergeClient(merged=True)

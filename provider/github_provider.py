@@ -319,8 +319,9 @@ class GitHubProvider:
         checks = self.client.api(f"repos/{self.repository}/commits/{expected_head}/check-runs")
         status = self.client.api(f"repos/{self.repository}/commits/{expected_head}/status")
         check_runs = checks.get("check_runs", [])
-        passing = status.get("state") == "success" and bool(check_runs) and all(item.get("status") == "completed" and item.get("conclusion") in ["success", "neutral", "skipped"] for item in check_runs)
-        check_evidence = {"state": status.get("state", "unknown"), "total": checks.get("total_count", 0), "runs": [{"name": item["name"], "status": item["status"], "conclusion": item.get("conclusion"), "url": item.get("html_url")} for item in check_runs]}
+        legacy_statuses = status.get("statuses", [])
+        passing = bool(check_runs) and all(item.get("status") == "completed" and item.get("conclusion") in ["success", "neutral", "skipped"] for item in check_runs) and all(item.get("state") == "success" for item in legacy_statuses)
+        check_evidence = {"state": status.get("state", "unknown"), "total": checks.get("total_count", 0), "runs": [{"name": item["name"], "status": item["status"], "conclusion": item.get("conclusion"), "url": item.get("html_url")} for item in check_runs], "legacyStatuses": [{"context": item.get("context"), "state": item.get("state"), "url": item.get("target_url")} for item in legacy_statuses]}
         if policy.get("requirePassingChecks", True) and not passing:
             raise GitHubError("Pull request checks are not passing", {"code": "checks_not_passing", "checks": check_evidence})
         result = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/merge", "PUT", {"sha": expected_head, "merge_method": policy.get("mergeMethod", "squash")})
