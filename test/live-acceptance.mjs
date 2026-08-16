@@ -93,7 +93,7 @@ const evidence = {
   },
   governedChange: {
     capability: "software.change.manage",
-    provider: "github_protocol",
+    provider: "github",
     planId: plan.id,
     planHash: plan.hash,
     approval: { actorId: approval.actorId, approvedActionIds: approval.approvedActionIds, approvedAt: approval.approvedAt },
@@ -157,7 +157,7 @@ async function connect(configuration) {
   return connectStdioProvider({
     command: python,
     args: [providerScript],
-    expectedProviderId: "github_protocol",
+    expectedProviderId: "github",
     configuration,
     context: { companyId: "github_provider_acceptance" },
     startupTimeoutMs: 30000,
@@ -171,7 +171,7 @@ function company() {
 kind: Company
 metadata: { id: github_provider_acceptance, name: GitHub Provider Acceptance }
 spec:
-  providers: { workflows: { provider: github_protocol } }
+  providers: { workflows: { provider: github } }
   capabilities:
     - id: software_change_manage
       name: Software Change Management

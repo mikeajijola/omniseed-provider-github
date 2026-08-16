@@ -100,7 +100,7 @@ class GitHubProvider:
         }
         return {
             "protocolVersion": PROTOCOL,
-            "provider": {"id": "github_protocol", "name": "GitHub Software Change Provider", "version": "0.1.0-alpha.3"},
+            "provider": {"id": "github", "name": "GitHub", "version": "0.1.0-alpha.3"},
             "primitiveFamilies": ["workflows"],
             "offerings": [{"family": "workflows", "id": "software_change_manage", "resource": resource}],
             "operations": OPERATIONS,
@@ -246,7 +246,7 @@ class GitHubProvider:
         drift = snapshot["baseSha"] != attributes.get("expectedBaseSha") and not merged
         evidence = {
             "type": "software_change_state",
-            "source": "github_protocol",
+            "source": "github",
             "repository": snapshot["repository"],
             "baseSha": attributes.get("baseSha") or attributes.get("expectedBaseSha"),
             "currentBaseSha": snapshot["baseSha"],
