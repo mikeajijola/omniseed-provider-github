@@ -17,8 +17,11 @@ METHODS = [
 ]
 OPERATIONS = [
     "software.change.observe", "software.change.status", "software.change.evidence",
-    "company.repository.inspect", "company.change.merge"
+    "company.repository.inspect", "repository.connector.observe",
+    "identity.subject.inspect", "company.change.merge"
 ]
+FAMILIES = ["workflows", "connectors", "identity"]
+VERSION = "0.1.0-alpha.4"
 
 
 def now():
@@ -77,7 +80,7 @@ class GitHubProvider:
         self.company_id = (params.get("context") or {}).get("companyId")
         observed = self.observe_repository() if self.repository else None
         expected = self.configuration.get("expectedBaseSha") or (observed or {}).get("baseSha")
-        resource = {
+        workflow_resource = {
             "family": "workflows",
             "id": "github_software_change",
             "name": "GitHub Software Change",
@@ -100,9 +103,20 @@ class GitHubProvider:
         }
         return {
             "protocolVersion": PROTOCOL,
-            "provider": {"id": "github", "name": "GitHub", "version": "0.1.0-alpha.3"},
-            "primitiveFamilies": ["workflows"],
-            "offerings": [{"family": "workflows", "id": "software_change_manage", "resource": resource}],
+            "provider": {"id": "github", "name": "GitHub", "organisation": "GitHub", "version": VERSION},
+            "primitiveFamilies": FAMILIES,
+            "offerings": [
+                {"family": "workflows", "id": "software_change_manage", "products": ["Repositories", "Checks", "Rulesets", "Apps/API"], "resource": workflow_resource},
+                {"family": "workflows", "id": "governed_change_process", "products": ["Repositories", "Pull Requests", "Checks"]},
+                {"family": "workflows", "id": "conformance_workflow", "products": ["Actions", "Checks"]},
+                {"family": "workflows", "id": "approved_desired_state_resolution", "products": ["Repositories", "Actions"]},
+                {"family": "workflows", "id": "deterministic_reconciliation", "products": ["Actions"]},
+                {"family": "connectors", "id": "repository_access", "products": ["Repositories", "Apps/API"]},
+                {"family": "connectors", "id": "public_repository_access", "products": ["Repositories", "Apps/API"]},
+                {"family": "identity", "id": "contributor_identity", "products": ["GitHub identities", "Apps/API"]},
+                {"family": "identity", "id": "operator_identity", "products": ["GitHub identities", "Apps/API"]},
+                {"family": "identity", "id": "reconciler_identity", "products": ["Actions OIDC"]}
+            ],
             "operations": OPERATIONS,
             "methods": METHODS
         }
@@ -132,6 +146,20 @@ class GitHubProvider:
         return ref["object"]["sha"]
 
     def validate(self, action):
+        family = action.get("family")
+        if family in ["connectors", "identity"]:
+            issues = []
+            if not action.get("resourceId"):
+                issues.append({"code": "missing_field", "field": "resourceId", "message": "resourceId is required"})
+            desired = action.get("desired") or {}
+            supported = {
+                "connectors": {"repository_access", "public_repository_access"},
+                "identity": {"contributor_identity", "operator_identity", "reconciler_identity"}
+            }
+            unsupported = sorted(set(desired.get("offers") or []) - supported[family])
+            if unsupported:
+                issues.append({"code": "unsupported_offering", "message": "GitHub does not supply the requested offering", "offerings": unsupported})
+            return {"valid": not issues, "issues": issues}
         issues = []
         spec = ((action or {}).get("desired") or {}).get("spec") or {}
         required = ["repository", "baseBranch", "expectedBaseSha", "branch", "path", "content", "commitMessage", "pullRequestTitle"]
@@ -166,6 +194,18 @@ class GitHubProvider:
         validation = self.validate(action)
         if not validation["valid"]:
             raise GitHubError("Action is no longer valid", {"issues": validation["issues"]})
+        if action.get("family") in ["connectors", "identity"]:
+            family = action["family"]
+            attributes = {
+                "family": family,
+                "resourceId": action["resourceId"],
+                "repository": self.repository,
+                "baseBranch": self.base_branch,
+                "offers": list((action.get("desired") or {}).get("offers") or [])
+            }
+            if family == "identity":
+                attributes["product"] = ((action.get("desired") or {}).get("spec") or {}).get("product", "GitHub identities")
+            return {"providerResourceId": f"github://{self.repository}/{family}/{action['resourceId']}", "status": "bound", "attributes": attributes}
         spec = action["desired"]["spec"]
         repo = spec["repository"]
         base_sha = spec["expectedBaseSha"]
@@ -241,6 +281,20 @@ class GitHubProvider:
 
     def observe(self, resource):
         attributes = resource.get("attributes") or {}
+        if attributes.get("family") == "connectors":
+            snapshot = self.observe_repository()
+            checked = snapshot["observedAt"]
+            evidence = {"type": "github_repository_observation", "source": "github", "repository": snapshot["repository"], "baseBranch": snapshot["baseBranch"], "baseSha": snapshot["baseSha"], "reachable": True, "observedAt": checked}
+            return {"status": "healthy", "checkedAt": checked, "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": snapshot}
+        if attributes.get("family") == "identity":
+            checked = now()
+            identity = self.client.authenticated_user()
+            product = attributes.get("product")
+            oidc_context = product == "GitHub Actions OIDC"
+            if oidc_context:
+                oidc_context = os.environ.get("GITHUB_ACTIONS") == "true" and bool(os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"))
+            evidence = {"type": "github_identity_observation", "source": "github", "resourceId": attributes.get("resourceId"), "authenticatedSubject": identity, "product": product, "oidcContextAvailable": oidc_context, "observedAt": checked}
+            return {"status": "healthy" if identity and (product != "GitHub Actions OIDC" or oidc_context) else "degraded", "checkedAt": checked, "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": evidence}
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         merged = bool((snapshot.get("pullRequest") or {}).get("merged"))
         drift = snapshot["baseSha"] != attributes.get("expectedBaseSha") and not merged
@@ -293,6 +347,10 @@ class GitHubProvider:
                     raise GitHubError("Canonical company document is not a base64 Git blob", {"path": path})
                 result["document"] = {"path": path, "sha": document.get("sha"), "content": base64.b64decode(document["content"]).decode("utf-8")}
             return result
+        if operation == "repository.connector.observe":
+            return self.observe_repository()
+        if operation == "identity.subject.inspect":
+            return {"provider": "github", "subject": self.client.authenticated_user(), "observedAt": now()}
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         if operation == "software.change.evidence":
             return {"repository": self.repository, "snapshot": snapshot, "requestedBy": (actor or {}).get("actorId")}

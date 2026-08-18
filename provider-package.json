@@ -1,22 +1,31 @@
 {
   "manifestVersion": "1.0",
   "id": "github",
-  "version": "0.1.0-alpha.3",
+  "organisation": "GitHub",
+  "version": "0.1.0-alpha.4",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
-  "primitiveFamilies": ["workflows"],
+  "primitiveFamilies": ["workflows", "connectors", "identity"],
+  "implementations": [
+    { "family": "workflows", "products": ["Repositories", "Actions", "Checks", "Rulesets", "Pull Requests", "Apps/API"] },
+    { "family": "connectors", "products": ["Repositories", "Apps/API"] },
+    { "family": "identity", "products": ["GitHub identities", "Actions OIDC", "Apps/API"] }
+  ],
   "operations": [
     "software.change.observe",
     "software.change.status",
     "software.change.evidence",
     "company.repository.inspect",
+    "repository.connector.observe",
+    "identity.subject.inspect",
     "company.change.merge"
   ],
   "configurationSchema": "./provider-configuration.schema.json",
-  "observationTypes": ["software_change_state"],
-  "evidenceTypes": ["software_change_state"],
+  "observationTypes": ["software_change_state", "github_repository_state", "github_identity_state"],
+  "evidenceTypes": ["software_change_state", "github_repository_observation", "github_identity_observation"],
   "permissions": [
     "github.repository.read",
     "github.contents.write",
-    "github.pull_request.write"
+    "github.pull_request.write",
+    "github.identity.read"
   ]
 }
