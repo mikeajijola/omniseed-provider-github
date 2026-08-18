@@ -90,11 +90,30 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github")
-        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.3")
-        self.assertEqual(result["primitiveFamilies"], ["workflows"])
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.4")
+        self.assertEqual(result["primitiveFamilies"], ["workflows", "connectors", "identity"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
         self.assertEqual(result["offerings"][0]["resource"]["spec"]["expectedBaseSha"], "base-1")
+
+    def test_one_github_provider_supplies_repository_connector_and_identity_contracts(self):
+        provider = MODULE.GitHubProvider(config(), FakeClient())
+        connector = {"id": "connector-1", "family": "connectors", "resourceId": "github_repositories", "desired": {"offers": ["repository_access", "public_repository_access"]}}
+        identity = {"id": "identity-1", "family": "identity", "resourceId": "operator_identities", "desired": {"offers": ["operator_identity"]}}
+        for action in [connector, identity]:
+            self.assertTrue(provider.validate(action)["valid"])
+            applied = provider.apply(action)
+            self.assertEqual(applied["attributes"]["family"], action["family"])
+            observed = provider.observe(applied)
+            self.assertEqual(observed["status"], "healthy")
+            self.assertEqual(observed["evidence"][0]["source"], "github")
+
+    def test_github_does_not_claim_steward_identity(self):
+        provider = MODULE.GitHubProvider(config(), FakeClient())
+        action = {"id": "identity-1", "family": "identity", "resourceId": "lily_identity", "desired": {"offers": ["steward_identity"]}}
+        result = provider.validate(action)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["issues"][0]["code"], "unsupported_offering")
 
     def test_initialization_retains_alpha_1_fixture_configuration_as_action_fields(self):
         legacy = {**config(), "branch": "omniseed/legacy", "fixturePath": "fixture.txt", "fixtureContent": "legacy\n", "commitMessage": "legacy", "pullRequestTitle": "Legacy"}

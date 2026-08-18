@@ -1,5 +1,10 @@
 # OmniSeed GitHub Provider
 
+GitHub is one Provider organisation. Repositories, Actions, Checks, Rulesets,
+Pull Requests, identities, and Apps/API are products/features beneath that
+single boundary—not separate Providers. This package implements the canonical
+`workflows`, `connectors`, and `identity` contracts it genuinely supplies.
+
 Provider declaration:
 
 - Supplying organisation: GitHub
