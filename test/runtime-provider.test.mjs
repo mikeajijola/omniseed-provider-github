@@ -92,3 +92,18 @@ test("governed merge binds exact head, approval, and passing check", async () =>
   assert.equal(result.mergeCommitSha, sha("m")); assert.deepEqual(result.approvedBy, ["reviewer"]);
   assert.equal(JSON.parse(calls.find(call => call.path.endsWith("/merge")).init.body).sha, sha("b"));
 });
+
+test("governed merge accepts only the configured successful GitHub Actions approval check", async () => {
+  let pulls = 0;
+  const routes = {
+    "GET /repos/example/company/pulls/6": () => (++pulls === 1 ? { number: 6, merged: false, head: { sha: sha("b") } } : { number: 6, merged: true, merged_at: "2026-08-24T12:00:00Z" }),
+    "GET /repos/example/company/pulls/6/reviews": [],
+    [`GET /repos/example/company/commits/${sha("b")}/check-runs`]: { check_runs: [{ name: "governed-company-change-approval", app: { slug: "github-actions" }, status: "completed", conclusion: "success", html_url: "https://checks/approval" }] },
+    [`GET /repos/example/company/commits/${sha("b")}/status`]: { state: "success", statuses: [] },
+    "PUT /repos/example/company/pulls/6/merge": { merged: true, sha: sha("m") },
+  };
+  const mergePolicy = { requireApproval: true, requirePassingChecks: true, mergeMethod: "squash", trustedApprovalChecks: [{ name: "governed-company-change-approval", appSlug: "github-actions" }] };
+  const { provider } = await connected(routes, { mergePolicy });
+  const result = await provider.invoke("company.change.merge", { pullRequestNumber: 6, expectedHeadSha: sha("b") }, { permissions: ["company_change.merge"] });
+  assert.deepEqual(result.trustedApprovals, ["github-actions:governed-company-change-approval"]);
+});

@@ -26,6 +26,19 @@
       "properties": {
         "requireApproval": { "type": "boolean", "default": true },
         "requirePassingChecks": { "type": "boolean", "default": true },
+        "trustedApprovalChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "appSlug"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "appSlug": { "type": "string", "minLength": 1 }
+            }
+          },
+          "default": []
+        },
         "mergeMethod": { "enum": ["merge", "squash", "rebase"], "default": "squash" }
       }
     }
