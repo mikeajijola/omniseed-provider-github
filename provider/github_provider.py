@@ -372,11 +372,21 @@ class GitHubProvider:
         policy = self.configuration.get("mergePolicy") or {}
         reviews = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/reviews")
         approved_by = sorted({review["user"]["login"] for review in reviews if review.get("state") == "APPROVED" and review.get("user", {}).get("login")})
-        if policy.get("requireApproval", True) and not approved_by:
-            raise GitHubError("Pull request lacks a required approval", {"code": "approval_required", "pullRequestNumber": pull_number})
         checks = self.client.api(f"repos/{self.repository}/commits/{expected_head}/check-runs")
         status = self.client.api(f"repos/{self.repository}/commits/{expected_head}/status")
         check_runs = checks.get("check_runs", [])
+        trusted = policy.get("trustedApprovalChecks") or []
+        trusted_approvals = sorted({
+            f"{item['app']['slug']}:{item['name']}"
+            for item in check_runs
+            for requirement in trusted
+            if item.get("name") == requirement.get("name")
+            and item.get("app", {}).get("slug") == requirement.get("appSlug")
+            and item.get("status") == "completed"
+            and item.get("conclusion") == "success"
+        })
+        if policy.get("requireApproval", True) and not approved_by and not trusted_approvals:
+            raise GitHubError("Pull request lacks a required approval", {"code": "approval_required", "pullRequestNumber": pull_number})
         legacy_statuses = status.get("statuses", [])
         passing = bool(check_runs) and all(item.get("status") == "completed" and item.get("conclusion") in ["success", "neutral", "skipped"] for item in check_runs) and all(item.get("state") == "success" for item in legacy_statuses)
         check_evidence = {"state": status.get("state", "unknown"), "total": checks.get("total_count", 0), "runs": [{"name": item["name"], "status": item["status"], "conclusion": item.get("conclusion"), "url": item.get("html_url")} for item in check_runs], "legacyStatuses": [{"context": item.get("context"), "state": item.get("state"), "url": item.get("target_url")} for item in legacy_statuses]}
@@ -385,7 +395,7 @@ class GitHubProvider:
         result = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/merge", "PUT", {"sha": expected_head, "merge_method": policy.get("mergeMethod", "squash")})
         if not result.get("merged"):
             raise GitHubError("GitHub did not merge the pull request", {"code": "merge_rejected", "message": result.get("message")})
-        return {"merged": True, "alreadyMerged": False, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": result.get("sha"), "mergedAt": now(), "approvedBy": approved_by, "checks": check_evidence, "mergedBy": actor.get("actorId")}
+        return {"merged": True, "alreadyMerged": False, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": result.get("sha"), "mergedAt": now(), "approvedBy": approved_by, "trustedApprovals": trusted_approvals, "checks": check_evidence, "mergedBy": actor.get("actorId")}
 
 
 def respond(request_id, result=None, error=None):

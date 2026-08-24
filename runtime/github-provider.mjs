@@ -122,13 +122,14 @@ export class GitHubProvider {
     ]);
     const approvedBy = latestApprovals(reviews);
     const policy = this.configuration.mergePolicy;
-    if (policy.requireApproval && approvedBy.length === 0) throw new GitHubProviderError("github_merge_approval_required", "Required pull request approval is missing");
     const summary = checkSummary(checks, combined);
+    const trustedApprovals = trustedApprovalChecks(checks, policy.trustedApprovalChecks);
+    if (policy.requireApproval && approvedBy.length === 0 && trustedApprovals.length === 0) throw new GitHubProviderError("github_merge_approval_required", "Required pull request approval is missing");
     if (policy.requirePassingChecks && (!summary.total || summary.state !== "success")) throw new GitHubProviderError("github_merge_checks_required", "Required non-empty checks are not passing", { checks: summary });
     const result = await this.#request(`/repos/${repo}/pulls/${number}/merge`, { method: "PUT", body: { sha: input.expectedHeadSha, merge_method: policy.mergeMethod } });
     if (!result.merged) throw new GitHubProviderError("github_merge_failed", "GitHub did not merge the approved pull request");
     const observed = await this.#request(`/repos/${repo}/pulls/${number}`);
-    return { status: "merged", mergeCommitSha: result.sha, mergedAt: observed.merged_at, approvedBy, checks: summary };
+    return { status: "merged", mergeCommitSha: result.sha, mergedAt: observed.merged_at, approvedBy, trustedApprovals, checks: summary };
   }
 
   async #observeRepository({ branch = null, commitSha = null, pullRequestNumber = null } = {}) {
@@ -158,6 +159,9 @@ function latestApprovals(reviews = []) {
   const latest = new Map();
   for (const review of reviews) if (review.user?.login) latest.set(review.user.login, review.state);
   return [...latest].filter(([, state]) => state === "APPROVED").map(([login]) => login).sort();
+}
+function trustedApprovalChecks(checks = {}, requirements = []) {
+  return (checks.check_runs ?? []).flatMap(run => requirements.some(requirement => run.name === requirement.name && run.app?.slug === requirement.appSlug && run.status === "completed" && run.conclusion === "success") ? [`${run.app.slug}:${run.name}`] : []).sort();
 }
 function checkSummary(checks = {}, combined = {}) {
   const runs = (checks.check_runs ?? []).map(item => ({ name: item.name, status: item.status, conclusion: item.conclusion ?? null, url: item.html_url ?? null }));

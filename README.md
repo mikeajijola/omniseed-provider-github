@@ -34,6 +34,13 @@ The Provider can:
 - detect when the base branch changed after planning.
 - merge an unchanged pull request only when actor authority and configured review/check policy pass.
 
+Approval may be evidenced either by a GitHub `APPROVED` review or by an exact-head
+successful check explicitly allow-listed by both check name and GitHub App slug in
+`mergePolicy.trustedApprovalChecks`. The latter supports the same pattern used by
+1Page: a protected GitHub Actions review/gate produces independent, inspectable
+evidence before the owner merge decision. A matching name from another App, a
+pending/failed check, or a result for another head SHA does not satisfy approval.
+
 It maps those behaviors to the unchanged Provider Protocol v1 methods: initialize, status, validate, plan, apply, observe, invoke, and shutdown.
 
 [`provider-package.json`](provider-package.json) is the static discovery claim. It describes what this package can support; it does not claim that the Provider is installed, configured, connected, healthy, or capable for a particular company.

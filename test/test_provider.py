@@ -43,13 +43,14 @@ class MutationClient(FakeClient):
 
 
 class MergeClient(FakeClient):
-    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False, legacy_statuses=None):
+    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False, legacy_statuses=None, trusted=False):
         super().__init__()
         self.approved = approved
         self.check_state = checks
         self.merged = merged
         self.api_failure = api_failure
         self.legacy_statuses = legacy_statuses
+        self.trusted = trusted
         self.merge_calls = 0
 
     def api(self, endpoint, method="GET", body=None, allow_failure=False):
@@ -59,7 +60,9 @@ class MergeClient(FakeClient):
             return [{"state": "APPROVED", "user": {"login": "reviewer"}}] if self.approved else []
         if endpoint.endswith("commits/head-7/check-runs"):
             conclusion = None if self.check_state == "pending" else self.check_state
-            return {"total_count": 1, "check_runs": [{"name": "conformance", "status": "completed" if conclusion else "in_progress", "conclusion": conclusion, "html_url": "https://checks/1"}]}
+            name = "governed-company-change-approval" if self.trusted else "conformance"
+            app = {"slug": "github-actions" if self.trusted else "other-app"}
+            return {"total_count": 1, "check_runs": [{"name": name, "app": app, "status": "completed" if conclusion else "in_progress", "conclusion": conclusion, "html_url": "https://checks/1"}]}
         if endpoint.endswith("commits/head-7/status"):
             statuses = self.legacy_statuses if self.legacy_statuses is not None else [{"context": "legacy", "state": self.check_state, "target_url": "https://status/1"}]
             return {"state": self.check_state if statuses else "pending", "statuses": statuses}
@@ -180,6 +183,20 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient(approved=False))
         with self.assertRaises(MODULE.GitHubError) as raised:
             provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(raised.exception.details["code"], "approval_required")
+
+    def test_governed_merge_accepts_exact_head_trusted_actions_approval_check(self):
+        client = MergeClient(approved=False, trusted=True)
+        policy = {"requireApproval": True, "requirePassingChecks": True, "trustedApprovalChecks": [{"name": "governed-company-change-approval", "appSlug": "github-actions"}]}
+        result = MODULE.GitHubProvider({**config(), "mergePolicy": policy}, client).invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(result["trustedApprovals"], ["github-actions:governed-company-change-approval"])
+
+    def test_governed_merge_rejects_same_named_check_from_untrusted_app(self):
+        client = MergeClient(approved=False, trusted=True)
+        client.trusted = False
+        policy = {"requireApproval": True, "requirePassingChecks": True, "trustedApprovalChecks": [{"name": "governed-company-change-approval", "appSlug": "github-actions"}]}
+        with self.assertRaises(MODULE.GitHubError) as raised:
+            MODULE.GitHubProvider({**config(), "mergePolicy": policy}, client).invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
         self.assertEqual(raised.exception.details["code"], "approval_required")
 
     def test_governed_merge_rejects_failing_or_pending_checks(self):
