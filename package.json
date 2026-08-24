@@ -3,8 +3,12 @@
   "version": "0.1.0-alpha.4",
   "private": true,
   "description": "Narrow GitHub implementation of OmniSeed Provider Protocol v1.",
+  "type": "module",
+  "exports": {
+    ".": "./runtime/github-provider.mjs"
+  },
   "scripts": {
-    "test": "python3 -m unittest discover -s test -p 'test_*.py'",
+    "test": "python3 -m unittest discover -s test -p 'test_*.py' && node --test test/runtime-provider.test.mjs",
     "acceptance": "node test/live-acceptance.mjs"
   },
   "engines": {
