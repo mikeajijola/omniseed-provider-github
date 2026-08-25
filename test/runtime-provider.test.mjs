@@ -89,8 +89,17 @@ test("governed merge binds exact head, approval, and passing check", async () =>
   };
   const { provider, calls } = await connected(routes);
   const result = await provider.invoke("company.change.merge", { pullRequestNumber: 5, expectedHeadSha: sha("b") }, { permissions: ["company_change.merge"] });
+  assert.equal(result.merged, true); assert.equal(result.alreadyMerged, false);
   assert.equal(result.mergeCommitSha, sha("m")); assert.deepEqual(result.approvedBy, ["reviewer"]);
   assert.equal(JSON.parse(calls.find(call => call.path.endsWith("/merge")).init.body).sha, sha("b"));
+});
+
+test("governed merge returns complete idempotent evidence for an already-merged exact head", async () => {
+  const routes = { "GET /repos/example/company/pulls/9": { number: 9, merged: true, merged_at: "2026-08-25T09:39:09Z", merge_commit_sha: sha("m"), head: { sha: sha("b") } } };
+  const { provider, calls } = await connected(routes);
+  const result = await provider.invoke("company.change.merge", { pullRequestNumber: 9, expectedHeadSha: sha("b") }, { permissions: ["company_change.merge"] });
+  assert.deepEqual({ merged: result.merged, alreadyMerged: result.alreadyMerged, mergeCommitSha: result.mergeCommitSha }, { merged: true, alreadyMerged: true, mergeCommitSha: sha("m") });
+  assert.equal(calls.some(call => call.path.endsWith("/merge")), false);
 });
 
 test("governed merge accepts successful and skipped check runs when no legacy status contexts exist", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@omniseed/provider-github-reference",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "private": true,
   "description": "Narrow GitHub implementation of OmniSeed Provider Protocol v1.",
   "type": "module",
