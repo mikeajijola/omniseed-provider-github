@@ -21,7 +21,7 @@ export class GitHubProvider {
     this.identity = identity;
     this.status = status ?? { implementation_available: true, configured: true, connected: false, healthy: false };
     this.metadata = {
-      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.4",
+      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.5",
       families: FAMILIES, operations: OPERATIONS,
       offerings: [
         { family: "workflows", id: "governed_change_process" },
@@ -169,5 +169,6 @@ function checkSummary(checks = {}, combined = {}) {
   const total = runs.length + statuses.length;
   const passingRuns = runs.every(item => item.status === "completed" && ["success", "neutral", "skipped"].includes(item.conclusion));
   const passingStatuses = statuses.every(item => item.state === "success");
-  return { state: total && passingRuns && passingStatuses && combined.state !== "failure" && combined.state !== "error" && combined.state !== "pending" ? "success" : combined.state ?? "unknown", total, runs };
+  const legacyStatePassing = statuses.length === 0 || combined.state === "success";
+  return { state: total && passingRuns && passingStatuses && legacyStatePassing ? "success" : combined.state ?? "unknown", total, runs };
 }

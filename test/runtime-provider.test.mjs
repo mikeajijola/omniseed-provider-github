@@ -93,6 +93,22 @@ test("governed merge binds exact head, approval, and passing check", async () =>
   assert.equal(JSON.parse(calls.find(call => call.path.endsWith("/merge")).init.body).sha, sha("b"));
 });
 
+test("governed merge accepts successful and skipped check runs when no legacy status contexts exist", async () => {
+  let pulls = 0;
+  const routes = {
+    "GET /repos/example/company/pulls/8": () => (++pulls === 1 ? { number: 8, merged: false, head: { sha: sha("b") } } : { number: 8, merged: true, merged_at: "2026-08-25T09:00:00Z", merge_commit_sha: sha("m") }),
+    "GET /repos/example/company/pulls/8/reviews": [{ user: { login: "reviewer" }, state: "APPROVED" }],
+    [`GET /repos/example/company/commits/${sha("b")}/check-runs`]: { check_runs: [{ name: "validate", status: "completed", conclusion: "success" }, { name: "reconcile", status: "completed", conclusion: "skipped" }] },
+    [`GET /repos/example/company/commits/${sha("b")}/status`]: { state: "pending", statuses: [] },
+    "PUT /repos/example/company/pulls/8/merge": { merged: true, sha: sha("m") },
+  };
+  const { provider } = await connected(routes);
+  const result = await provider.invoke("company.change.merge", { pullRequestNumber: 8, expectedHeadSha: sha("b") }, { permissions: ["company_change.merge"] });
+  assert.equal(result.status, "merged");
+  assert.equal(result.checks.state, "success");
+  assert.equal(result.checks.total, 2);
+});
+
 test("governed merge accepts only the configured successful GitHub Actions approval check", async () => {
   let pulls = 0;
   const routes = {
