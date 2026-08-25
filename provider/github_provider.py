@@ -21,7 +21,7 @@ OPERATIONS = [
     "identity.subject.inspect", "company.change.merge"
 ]
 FAMILIES = ["workflows", "connectors", "identity"]
-VERSION = "0.1.0-alpha.4"
+VERSION = "0.1.0-alpha.5"
 
 
 def now():

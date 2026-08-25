@@ -93,7 +93,7 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github")
-        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.4")
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.5")
         self.assertEqual(result["primitiveFamilies"], ["workflows", "connectors", "identity"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
