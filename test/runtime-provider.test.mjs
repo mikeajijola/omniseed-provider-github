@@ -57,6 +57,17 @@ test("identity rejects unsupported kinds and reports secret field paths without 
   assert.equal(JSON.stringify(result).includes("never-print-this"), false);
 });
 
+test("identity.subject.inspect invokes a scoped read-only collaborator lookup", async () => {
+  const collaborator = { permission: "write", role_name: "write", user: { id: 42, login: "octocat", type: "User", html_url: "https://github.com/octocat", email: "must-not-leak@example.test" } };
+  const { provider, calls } = await connected({ "GET /repos/example/company/collaborators/octocat/permission": collaborator });
+  const result = await provider.invoke("identity.subject.inspect", { kind: "repository_collaborator", login: "octocat", repository: "example/company" }, { actorId: "engine" });
+  const collaboratorCalls = calls.filter(call => call.path.includes("/collaborators/"));
+  assert.equal(collaboratorCalls.length, 1);
+  assert.equal(collaboratorCalls[0].init.method, "GET");
+  assert.equal(result.subjectId, 42); assert.equal(result.permission, "write");
+  assert.equal("email" in result, false);
+});
+
 test("repository inspection returns the exact canonical document", async () => {
   const content = "metadata:\n  name: Company\n";
   const { provider } = await connected({ "GET /repos/example/company/contents/omniform.yaml?ref=main": { sha: sha("b"), content: Buffer.from(content).toString("base64") } });

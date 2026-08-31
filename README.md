@@ -26,6 +26,18 @@ GitHub is one possible realisation of the governed change/review workflow requir
 
 The identity implementation is deliberately reference-only. It supports `contributor_identity` when desired state declares `spec.kind: repository_collaborator`, the configured `spec.repository`, and a public GitHub `spec.login`. Validation, deterministic observation-only planning, non-mutating binding, observation, and evidence are implemented. GitHub's collaborator-permission API externally proves that the account is a collaborator of the configured repository. Evidence is limited to the declared login, GitHub subject ID/type, repository permission/role, and public profile URL.
 
+The `identity.subject.inspect` invoke operation accepts a flat input object (not an identity desired-state envelope):
+
+```json
+{
+  "kind": "repository_collaborator",
+  "login": "octocat",
+  "repository": "owner/repository"
+}
+```
+
+`kind` and `login` are required. `repository` may be omitted to use the Provider's configured repository; when supplied, it must match that configured repository. The operation is read-only and returns the same redacted collaborator evidence used by identity observation. A nested `desired.spec` object is not accepted by this invoke operation.
+
 The Provider does not create users, invite collaborators, change roles, or manage credentials. Credential-shaped fields are rejected and their values are never echoed. GitHub accounts do not prove OmniSeed steward or operator authority, and GitHub Actions OIDC is an assertion mechanism for a relying service rather than a GitHub-provisioned reconciler identity. Consequently `steward_identity`, `operator_identity`, `reconciler_identity`, GitHub App identities, organisation membership, and all other identity kinds return explicit unsupported outcomes. Those company resources must select a Provider that can truthfully provision or observe the requested identity semantics; the dependent governed Company Change is tracked in [omniseed-ecosystem-company#100](https://github.com/mikeajijola/omniseed-ecosystem-company/issues/100).
 
 ## What it does

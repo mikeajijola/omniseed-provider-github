@@ -135,6 +135,18 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("secret_field_forbidden", {issue["code"] for issue in result["issues"]})
         self.assertNotIn("never-print-this", str(result))
 
+    def test_identity_subject_inspect_invokes_scoped_collaborator_lookup(self):
+        client = FakeClient()
+        provider = MODULE.GitHubProvider(config(), client)
+        result = provider.invoke("identity.subject.inspect", {
+            "kind": "repository_collaborator", "login": "octocat",
+            "repository": "example/sandbox"
+        }, {"actorId": "engine"})
+        self.assertEqual(client.last_identity_observation, ("example/sandbox", "octocat"))
+        self.assertEqual(result["subjectId"], 42)
+        self.assertEqual(result["permission"], "write")
+        self.assertNotIn("email", result)
+
     def test_initialization_retains_alpha_1_fixture_configuration_as_action_fields(self):
         legacy = {**config(), "branch": "omniseed/legacy", "fixturePath": "fixture.txt", "fixtureContent": "legacy\n", "commitMessage": "legacy", "pullRequestTitle": "Legacy"}
         provider = MODULE.GitHubProvider(legacy, FakeClient())
