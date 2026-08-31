@@ -21,11 +21,30 @@ OPERATIONS = [
     "identity.subject.inspect", "company.change.merge"
 ]
 FAMILIES = ["workflows", "connectors", "identity"]
-VERSION = "0.1.0-alpha.6"
+VERSION = "0.1.0-alpha.7"
+IDENTITY_KIND = "repository_collaborator"
+IDENTITY_OFFERS = {"contributor_identity"}
+SECRET_FIELD_PARTS = ("token", "secret", "password", "credential", "authorization")
 
 
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def find_secret_fields(value, path="desired"):
+    """Return paths for credential-shaped fields without ever returning their values."""
+    found = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}"
+            if any(part in key.lower() for part in SECRET_FIELD_PARTS):
+                found.append(child_path)
+            else:
+                found.extend(find_secret_fields(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(find_secret_fields(child, f"{path}[{index}]"))
+    return found
 
 
 class GitHubError(RuntimeError):
@@ -56,6 +75,9 @@ class GitHubClient:
 
     def authenticated_user(self):
         return self.api("user")["login"]
+
+    def repository_collaborator(self, repository, login):
+        return self.api(f"repos/{repository}/collaborators/{urllib.parse.quote(login, safe='')}/permission")
 
 
 class GitHubProvider:
@@ -113,9 +135,7 @@ class GitHubProvider:
                 {"family": "workflows", "id": "deterministic_reconciliation", "products": ["Actions"]},
                 {"family": "connectors", "id": "repository_access", "products": ["Repositories", "Apps/API"]},
                 {"family": "connectors", "id": "public_repository_access", "products": ["Repositories", "Apps/API"]},
-                {"family": "identity", "id": "contributor_identity", "products": ["GitHub identities", "Apps/API"]},
-                {"family": "identity", "id": "operator_identity", "products": ["GitHub identities", "Apps/API"]},
-                {"family": "identity", "id": "reconciler_identity", "products": ["Actions OIDC"]}
+                {"family": "identity", "id": "contributor_identity", "products": ["Repository collaborators", "Apps/API"], "lifecycle": ["validate", "plan", "bind", "observe", "evidence"], "mutation": False}
             ],
             "operations": OPERATIONS,
             "methods": METHODS
@@ -154,11 +174,22 @@ class GitHubProvider:
             desired = action.get("desired") or {}
             supported = {
                 "connectors": {"repository_access", "public_repository_access"},
-                "identity": {"contributor_identity", "operator_identity", "reconciler_identity"}
+                "identity": IDENTITY_OFFERS
             }
             unsupported = sorted(set(desired.get("offers") or []) - supported[family])
             if unsupported:
                 issues.append({"code": "unsupported_offering", "message": "GitHub does not supply the requested offering", "offerings": unsupported})
+            if family == "identity":
+                spec = desired.get("spec") or {}
+                secret_fields = sorted(find_secret_fields(desired))
+                if secret_fields:
+                    issues.append({"code": "secret_field_forbidden", "message": "Identity desired state must not contain credentials or secrets", "fields": secret_fields})
+                if spec.get("kind") != IDENTITY_KIND:
+                    issues.append({"code": "unsupported_identity_kind", "message": "GitHub supplies only non-mutating repository collaborator references; select another Provider for this identity kind", "requestedKind": spec.get("kind"), "supportedKinds": [IDENTITY_KIND]})
+                if not isinstance(spec.get("login"), str) or not spec.get("login", "").strip():
+                    issues.append({"code": "missing_field", "field": "spec.login", "message": "spec.login is required"})
+                if spec.get("repository") != self.repository:
+                    issues.append({"code": "repository_scope_mismatch", "message": "Identity repository must match Provider configuration"})
             return {"valid": not issues, "issues": issues}
         issues = []
         spec = ((action or {}).get("desired") or {}).get("spec") or {}
@@ -188,7 +219,10 @@ class GitHubProvider:
         return {"valid": not issues, "issues": issues}
 
     def plan(self, action):
-        return {"deterministic": True, "actionId": action.get("id"), "externalPrecondition": ((action.get("desired") or {}).get("spec") or {}).get("expectedBaseSha")}
+        result = {"deterministic": True, "actionId": action.get("id"), "externalPrecondition": ((action.get("desired") or {}).get("spec") or {}).get("expectedBaseSha")}
+        if action.get("family") == "identity":
+            result.update({"mode": "observe_only", "mutation": False, "kind": IDENTITY_KIND})
+        return result
 
     def apply(self, action):
         validation = self.validate(action)
@@ -204,7 +238,8 @@ class GitHubProvider:
                 "offers": list((action.get("desired") or {}).get("offers") or [])
             }
             if family == "identity":
-                attributes["product"] = ((action.get("desired") or {}).get("spec") or {}).get("product", "GitHub identities")
+                spec = (action.get("desired") or {}).get("spec") or {}
+                attributes.update({"kind": IDENTITY_KIND, "login": spec["login"], "product": "Repository collaborators"})
             return {"providerResourceId": f"github://{self.repository}/{family}/{action['resourceId']}", "status": "bound", "attributes": attributes}
         spec = action["desired"]["spec"]
         repo = spec["repository"]
@@ -287,14 +322,8 @@ class GitHubProvider:
             evidence = {"type": "github_repository_observation", "source": "github", "repository": snapshot["repository"], "baseBranch": snapshot["baseBranch"], "baseSha": snapshot["baseSha"], "reachable": True, "observedAt": checked}
             return {"status": "healthy", "checkedAt": checked, "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": snapshot}
         if attributes.get("family") == "identity":
-            checked = now()
-            identity = self.client.authenticated_user()
-            product = attributes.get("product")
-            oidc_context = product == "GitHub Actions OIDC"
-            if oidc_context:
-                oidc_context = os.environ.get("GITHUB_ACTIONS") == "true" and bool(os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL"))
-            evidence = {"type": "github_identity_observation", "source": "github", "resourceId": attributes.get("resourceId"), "authenticatedSubject": identity, "product": product, "oidcContextAvailable": oidc_context, "observedAt": checked}
-            return {"status": "healthy" if identity and (product != "GitHub Actions OIDC" or oidc_context) else "degraded", "checkedAt": checked, "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": evidence}
+            evidence = self.observe_identity(attributes)
+            return {"status": "healthy", "checkedAt": evidence["observedAt"], "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": evidence}
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         merged = bool((snapshot.get("pullRequest") or {}).get("merged"))
         drift = snapshot["baseSha"] != attributes.get("expectedBaseSha") and not merged
@@ -350,11 +379,28 @@ class GitHubProvider:
         if operation == "repository.connector.observe":
             return self.observe_repository()
         if operation == "identity.subject.inspect":
-            return {"provider": "github", "subject": self.client.authenticated_user(), "observedAt": now()}
+            return self.observe_identity(attributes)
         snapshot = self.observe_repository(attributes.get("branch"), attributes.get("commitSha"), attributes.get("pullRequestNumber"))
         if operation == "software.change.evidence":
             return {"repository": self.repository, "snapshot": snapshot, "requestedBy": (actor or {}).get("actorId")}
         return snapshot
+
+    def observe_identity(self, attributes):
+        if attributes.get("kind") != IDENTITY_KIND or not attributes.get("login"):
+            raise GitHubError("Unsupported identity kind", {"code": "unsupported_identity_kind", "supportedKinds": [IDENTITY_KIND]})
+        repository = attributes.get("repository") or self.repository
+        if repository != self.repository:
+            raise GitHubError("Identity observation is outside configured Provider scope", {"code": "repository_scope_mismatch"})
+        result = self.client.repository_collaborator(repository, attributes["login"])
+        user = result.get("user") or {}
+        return {
+            "type": "github_identity_observation", "source": "github", "provider": "github",
+            "resourceId": attributes.get("resourceId"), "kind": IDENTITY_KIND,
+            "repository": repository, "login": user.get("login") or attributes["login"],
+            "subjectId": user.get("id"), "subjectType": user.get("type"),
+            "permission": result.get("permission"), "roleName": result.get("role_name"),
+            "profileUrl": user.get("html_url"), "observedAt": now()
+        }
 
     def merge_company_change(self, attributes, actor):
         permissions = actor.get("permissions") or []

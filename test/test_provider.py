@@ -16,6 +16,10 @@ class FakeClient:
     def authenticated_user(self):
         return "fixture-user"
 
+    def repository_collaborator(self, repository, login):
+        self.last_identity_observation = (repository, login)
+        return {"permission": "write", "role_name": "write", "user": {"id": 42, "login": login, "type": "User", "html_url": f"https://github.com/{login}", "email": "must-not-leak@example.test"}}
+
     def api(self, endpoint, method="GET", body=None, allow_failure=False):
         if endpoint == "repos/example/sandbox": return {"html_url": "https://github.com/example/sandbox", "default_branch": "main"}
         if endpoint.endswith("git/ref/heads/main"): return {"object": {"sha": self.current}}
@@ -93,16 +97,16 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github")
-        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.6")
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.7")
         self.assertEqual(result["primitiveFamilies"], ["workflows", "connectors", "identity"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
         self.assertEqual(result["offerings"][0]["resource"]["spec"]["expectedBaseSha"], "base-1")
 
-    def test_one_github_provider_supplies_repository_connector_and_identity_contracts(self):
+    def test_one_github_provider_supplies_repository_connector_and_read_only_identity_contracts(self):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         connector = {"id": "connector-1", "family": "connectors", "resourceId": "github_repositories", "desired": {"offers": ["repository_access", "public_repository_access"]}}
-        identity = {"id": "identity-1", "family": "identity", "resourceId": "operator_identities", "desired": {"offers": ["operator_identity"]}}
+        identity = {"id": "identity-1", "family": "identity", "resourceId": "contributor_identities", "desired": {"offers": ["contributor_identity"], "spec": {"kind": "repository_collaborator", "repository": "example/sandbox", "login": "octocat"}}}
         for action in [connector, identity]:
             self.assertTrue(provider.validate(action)["valid"])
             applied = provider.apply(action)
@@ -110,6 +114,10 @@ class ProviderTests(unittest.TestCase):
             observed = provider.observe(applied)
             self.assertEqual(observed["status"], "healthy")
             self.assertEqual(observed["evidence"][0]["source"], "github")
+        self.assertEqual(provider.plan(identity)["mode"], "observe_only")
+        self.assertFalse(provider.plan(identity)["mutation"])
+        self.assertEqual(observed["evidence"][0]["subjectId"], 42)
+        self.assertNotIn("email", observed["evidence"][0])
 
     def test_github_does_not_claim_steward_identity(self):
         provider = MODULE.GitHubProvider(config(), FakeClient())
@@ -117,6 +125,15 @@ class ProviderTests(unittest.TestCase):
         result = provider.validate(action)
         self.assertFalse(result["valid"])
         self.assertEqual(result["issues"][0]["code"], "unsupported_offering")
+
+    def test_identity_rejects_unsupported_kind_and_redacts_secret_values(self):
+        provider = MODULE.GitHubProvider(config(), FakeClient())
+        action = {"id": "identity-1", "family": "identity", "resourceId": "reconciler_identity", "desired": {"offers": ["reconciler_identity"], "spec": {"kind": "actions_oidc", "repository": "example/sandbox", "login": "runner", "accessToken": "never-print-this"}}}
+        result = provider.validate(action)
+        self.assertFalse(result["valid"])
+        self.assertIn("unsupported_identity_kind", {issue["code"] for issue in result["issues"]})
+        self.assertIn("secret_field_forbidden", {issue["code"] for issue in result["issues"]})
+        self.assertNotIn("never-print-this", str(result))
 
     def test_initialization_retains_alpha_1_fixture_configuration_as_action_fields(self):
         legacy = {**config(), "branch": "omniseed/legacy", "fixturePath": "fixture.txt", "fixtureContent": "legacy\n", "commitMessage": "legacy", "pullRequestTitle": "Legacy"}
