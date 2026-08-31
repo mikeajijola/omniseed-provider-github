@@ -16,11 +16,29 @@ GitHub Actions, Checks, Rulesets, Repositories, and Apps/API are not separate Pr
 
 This is a narrow real-world test of OmniSeed Provider Protocol v1-alpha.
 
-It supplies one narrow Provider realisation for the `workflows` primitive family, used by the Company Capability:
+It supplies narrow Provider realisations for `workflows`, repository `connectors`, and one `identity` reference kind, used by the Company Capability:
 
 `software.change.manage`
 
-GitHub is one possible realisation of the governed change/review workflow requirement composed by that capability. The Provider does not define software development itself, bind the Capability directly to GitHub, or act as a general GitHub API wrapper. It advertises only `workflows`: the implementation actually progresses a change through branch, commit, pull-request, and observed review/check states. Its observation and evidence methods support that workflow lifecycle; they do not claim a separately selectable `observations` implementation.
+GitHub is one possible realisation of the governed change/review workflow requirement composed by that capability. The Provider does not define software development itself, bind the Capability directly to GitHub, or act as a general GitHub API wrapper. Its observation and evidence methods support the advertised resource lifecycles; they do not claim a separately selectable `observations` implementation.
+
+## Identity semantics
+
+The identity implementation is deliberately reference-only. It supports `contributor_identity` when desired state declares `spec.kind: repository_collaborator`, the configured `spec.repository`, and a public GitHub `spec.login`. Validation, deterministic observation-only planning, non-mutating binding, observation, and evidence are implemented. GitHub's collaborator-permission API externally proves that the account is a collaborator of the configured repository. Evidence is limited to the declared login, GitHub subject ID/type, repository permission/role, and public profile URL.
+
+The `identity.subject.inspect` invoke operation accepts a flat input object (not an identity desired-state envelope):
+
+```json
+{
+  "kind": "repository_collaborator",
+  "login": "octocat",
+  "repository": "owner/repository"
+}
+```
+
+`kind` and `login` are required. `repository` may be omitted to use the Provider's configured repository; when supplied, it must match that configured repository. The operation is read-only and returns the same redacted collaborator evidence used by identity observation. A nested `desired.spec` object is not accepted by this invoke operation.
+
+The Provider does not create users, invite collaborators, change roles, or manage credentials. Credential-shaped fields are rejected and their values are never echoed. GitHub accounts do not prove OmniSeed steward or operator authority, and GitHub Actions OIDC is an assertion mechanism for a relying service rather than a GitHub-provisioned reconciler identity. Consequently `steward_identity`, `operator_identity`, `reconciler_identity`, GitHub App identities, organisation membership, and all other identity kinds return explicit unsupported outcomes. Those company resources must select a Provider that can truthfully provision or observe the requested identity semantics; the dependent governed Company Change is tracked in [omniseed-ecosystem-company#100](https://github.com/mikeajijola/omniseed-ecosystem-company/issues/100).
 
 ## What it does
 
@@ -69,3 +87,11 @@ OMNISEED_GITHUB_LIVE=1 npm run acceptance -- \
 
 Each run writes exact external evidence to `evidence/latest.json` and `evidence/runs/<run-id>.json`.
 Run IDs are immutable and cannot be reused. This prevents a dirty local state or repeated sandbox branch from overwriting earlier acceptance evidence.
+
+Identity acceptance is read-only and separately gated. It requires a GitHub token through the environment and never writes the token or the full GitHub response:
+
+```sh
+OMNISEED_GITHUB_IDENTITY_LIVE=1 npm run acceptance:identity -- \
+  --repo mikeajijola/omniseed-provider-github \
+  --login mikeajijola
+```

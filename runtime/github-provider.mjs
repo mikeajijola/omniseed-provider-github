@@ -5,6 +5,9 @@ const OPERATIONS = [
   "company.repository.inspect", "repository.connector.observe", "identity.subject.inspect",
   "company.change.merge",
 ];
+const IDENTITY_KIND = "repository_collaborator";
+const IDENTITY_OFFERS = new Set(["contributor_identity"]);
+const SECRET_FIELD = /token|secret|password|credential|authorization/i;
 
 export class GitHubProviderError extends Error {
   constructor(code, message, details = {}) { super(message); this.name = "GitHubProviderError"; this.code = code; this.details = details; }
@@ -21,14 +24,14 @@ export class GitHubProvider {
     this.identity = identity;
     this.status = status ?? { implementation_available: true, configured: true, connected: false, healthy: false };
     this.metadata = {
-      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.6",
+      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.7",
       families: FAMILIES, operations: OPERATIONS,
       offerings: [
         { family: "workflows", id: "governed_change_process" },
         { family: "workflows", id: "software_change_manage" },
         { family: "workflows", id: "conformance_workflow" },
         { family: "connectors", id: "repository_access" },
-        { family: "identity", id: "contributor_identity" },
+        { family: "identity", id: "contributor_identity", products: ["Repository collaborators", "Apps/API"], lifecycle: ["validate", "plan", "bind", "observe", "evidence"], mutation: false },
       ],
     };
   }
@@ -42,6 +45,7 @@ export class GitHubProvider {
   }
 
   async validate(action) {
+    if (action?.family === "identity") return this.#validateIdentity(action);
     const spec = action?.desired?.spec ?? {};
     const issues = [];
     for (const field of ["repository", "baseBranch", "expectedBaseSha", "branch", "path", "content", "commitMessage", "pullRequestTitle"]) {
@@ -58,12 +62,16 @@ export class GitHubProvider {
     return { valid: issues.length === 0, issues };
   }
 
-  async plan(action) { return { deterministic: true, actionId: action.id, externalPrecondition: action?.desired?.spec?.expectedBaseSha }; }
+  async plan(action) {
+    if (action?.family === "identity") return { deterministic: true, actionId: action.id, mode: "observe_only", mutation: false, kind: IDENTITY_KIND };
+    return { deterministic: true, actionId: action.id, externalPrecondition: action?.desired?.spec?.expectedBaseSha };
+  }
 
   async apply(action) {
     const validation = await this.validate(action);
     if (!validation.valid) throw new GitHubProviderError("github_action_invalid", "Action is no longer valid", { issues: validation.issues });
     const spec = action.desired.spec;
+    if (action.family === "identity") return { providerResourceId: `github://${spec.repository}/identity/${action.resourceId}`, status: "bound", attributes: { family: "identity", resourceId: action.resourceId, offers: [...(action.desired.offers ?? [])], kind: IDENTITY_KIND, repository: spec.repository, login: spec.login, product: "Repository collaborators" } };
     const repo = spec.repository;
     await this.#request(`/repos/${repo}/git/refs`, { method: "POST", body: { ref: `refs/heads/${spec.branch}`, sha: spec.expectedBaseSha } });
     const base = await this.#request(`/repos/${repo}/git/commits/${spec.expectedBaseSha}`);
@@ -76,6 +84,10 @@ export class GitHubProvider {
 
   async observe(resource) {
     const attributes = resource?.attributes ?? {};
+    if (attributes.family === "identity") {
+      const evidence = await this.#observeIdentity(attributes);
+      return { status: "healthy", checkedAt: evidence.observedAt, providerResourceId: resource.providerResourceId, snapshot: evidence, evidence: [evidence] };
+    }
     const snapshot = await this.#observeRepository({ branch: attributes.branch, commitSha: attributes.commitSha, pullRequestNumber: attributes.pullRequestNumber });
     const merged = Boolean(snapshot.pullRequest?.merged);
     return {
@@ -92,7 +104,7 @@ export class GitHubProvider {
     if (!OPERATIONS.includes(operation)) throw new GitHubProviderError("github_operation_unsupported", `Unsupported GitHub Provider operation: ${operation}`);
     if (operation === "company.repository.inspect") return this.#inspectRepository(input);
     if (operation === "company.change.merge") return this.#merge(input, actor);
-    if (operation === "identity.subject.inspect") return { provider: "github", identity: this.identity, observedAt: new Date().toISOString() };
+    if (operation === "identity.subject.inspect") return this.#observeIdentity(input ?? {});
     return this.#observeRepository(input ?? {});
   }
 
@@ -105,6 +117,27 @@ export class GitHubProvider {
       document = { path: input.path, content: Buffer.from(file.content, "base64").toString("utf8"), sha: file.sha };
     }
     return { repository: this.configuration.repository, baseBranch: this.configuration.baseBranch, baseSha, document, observedAt: new Date().toISOString() };
+  }
+
+  #validateIdentity(action) {
+    const desired = action?.desired ?? {}, spec = desired.spec ?? {}, issues = [];
+    const unsupported = (desired.offers ?? []).filter(offer => !IDENTITY_OFFERS.has(offer)).sort();
+    if (!action.resourceId) issues.push({ code: "missing_field", field: "resourceId", message: "resourceId is required" });
+    if (unsupported.length) issues.push({ code: "unsupported_offering", message: "GitHub does not supply the requested offering", offerings: unsupported });
+    const secretFields = findSecretFields(desired);
+    if (secretFields.length) issues.push({ code: "secret_field_forbidden", message: "Identity desired state must not contain credentials or secrets", fields: secretFields });
+    if (spec.kind !== IDENTITY_KIND) issues.push({ code: "unsupported_identity_kind", message: "GitHub supplies only non-mutating repository collaborator references; select another Provider for this identity kind", requestedKind: spec.kind, supportedKinds: [IDENTITY_KIND] });
+    if (typeof spec.login !== "string" || !spec.login.trim()) issues.push({ code: "missing_field", field: "spec.login", message: "spec.login is required" });
+    if (spec.repository !== this.configuration.repository) issues.push({ code: "repository_scope_mismatch", message: "Identity repository must match Provider configuration" });
+    return { valid: issues.length === 0, issues };
+  }
+
+  async #observeIdentity(attributes) {
+    if (attributes.kind !== IDENTITY_KIND || !attributes.login) throw new GitHubProviderError("github_identity_kind_unsupported", "GitHub supplies only repository collaborator identity references", { supportedKinds: [IDENTITY_KIND] });
+    const repository = attributes.repository ?? this.configuration.repository;
+    if (repository !== this.configuration.repository) throw new GitHubProviderError("github_repository_scope_mismatch", "Identity observation is outside configured Provider scope");
+    const result = await this.#request(`/repos/${repository}/collaborators/${encodeURIComponent(attributes.login)}/permission`), user = result.user ?? {};
+    return { type: "github_identity_observation", source: "github", provider: "github", resourceId: attributes.resourceId, kind: IDENTITY_KIND, repository, login: user.login ?? attributes.login, subjectId: user.id, subjectType: user.type, permission: result.permission, roleName: result.role_name, profileUrl: user.html_url, observedAt: new Date().toISOString() };
   }
 
   async #merge(input, actor) {
@@ -155,6 +188,11 @@ export class GitHubProvider {
 }
 
 function encodePath(path) { return path.split("/").map(encodeURIComponent).join("/"); }
+function findSecretFields(value, path = "desired", found = []) {
+  if (Array.isArray(value)) value.forEach((child, index) => findSecretFields(child, `${path}[${index}]`, found));
+  else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) SECRET_FIELD.test(key) ? found.push(`${path}.${key}`) : findSecretFields(child, `${path}.${key}`, found);
+  return found.sort();
+}
 function latestApprovals(reviews = []) {
   const latest = new Map();
   for (const review of reviews) if (review.user?.login) latest.set(review.user.login, review.state);

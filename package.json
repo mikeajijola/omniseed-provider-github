@@ -1,6 +1,6 @@
 {
   "name": "@omniseed/provider-github-reference",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "description": "Narrow GitHub implementation of OmniSeed Provider Protocol v1.",
   "type": "module",
@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "python3 -m unittest discover -s test -p 'test_*.py' && node --test test/runtime-provider.test.mjs",
-    "acceptance": "node test/live-acceptance.mjs"
+    "acceptance": "node test/live-acceptance.mjs",
+    "acceptance:identity": "node test/live-identity-acceptance.mjs"
   },
   "engines": {
     "node": ">=22"

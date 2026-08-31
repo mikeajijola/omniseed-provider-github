@@ -36,6 +36,38 @@ test("connect derives healthy Provider status without exposing the credential", 
   assert.equal(JSON.stringify(provider.metadata).includes("not-a-real-token"), false);
 });
 
+test("identity lifecycle binds and externally observes only a repository collaborator", async () => {
+  const collaborator = { permission: "write", role_name: "write", user: { id: 42, login: "octocat", type: "User", html_url: "https://github.com/octocat", email: "must-not-leak@example.test" } };
+  const { provider, calls } = await connected({ "GET /repos/example/company/collaborators/octocat/permission": collaborator });
+  const action = { id: "identity-1", family: "identity", resourceId: "contributors", desired: { offers: ["contributor_identity"], spec: { kind: "repository_collaborator", repository: "example/company", login: "octocat" } } };
+  assert.deepEqual(await provider.validate(action), { valid: true, issues: [] });
+  assert.deepEqual(await provider.plan(action), { deterministic: true, actionId: "identity-1", mode: "observe_only", mutation: false, kind: "repository_collaborator" });
+  const applied = await provider.apply(action), observed = await provider.observe(applied);
+  assert.equal(observed.status, "healthy"); assert.equal(observed.evidence[0].subjectId, 42);
+  assert.equal("email" in observed.evidence[0], false);
+  assert.equal(calls.filter(call => call.path.includes("/collaborators/")).every(call => call.init.method === "GET"), true);
+});
+
+test("identity rejects unsupported kinds and reports secret field paths without values", async () => {
+  const { provider } = await connected();
+  const result = await provider.validate({ id: "identity-2", family: "identity", resourceId: "reconciler", desired: { offers: ["reconciler_identity"], spec: { kind: "actions_oidc", repository: "example/company", login: "runner", accessToken: "never-print-this" } } });
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(issue => issue.code === "unsupported_identity_kind"));
+  assert.ok(result.issues.some(issue => issue.code === "secret_field_forbidden"));
+  assert.equal(JSON.stringify(result).includes("never-print-this"), false);
+});
+
+test("identity.subject.inspect invokes a scoped read-only collaborator lookup", async () => {
+  const collaborator = { permission: "write", role_name: "write", user: { id: 42, login: "octocat", type: "User", html_url: "https://github.com/octocat", email: "must-not-leak@example.test" } };
+  const { provider, calls } = await connected({ "GET /repos/example/company/collaborators/octocat/permission": collaborator });
+  const result = await provider.invoke("identity.subject.inspect", { kind: "repository_collaborator", login: "octocat", repository: "example/company" }, { actorId: "engine" });
+  const collaboratorCalls = calls.filter(call => call.path.includes("/collaborators/"));
+  assert.equal(collaboratorCalls.length, 1);
+  assert.equal(collaboratorCalls[0].init.method, "GET");
+  assert.equal(result.subjectId, 42); assert.equal(result.permission, "write");
+  assert.equal("email" in result, false);
+});
+
 test("repository inspection returns the exact canonical document", async () => {
   const content = "metadata:\n  name: Company\n";
   const { provider } = await connected({ "GET /repos/example/company/contents/omniform.yaml?ref=main": { sha: sha("b"), content: Buffer.from(content).toString("base64") } });

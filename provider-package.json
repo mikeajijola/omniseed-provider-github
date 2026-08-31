@@ -2,13 +2,13 @@
   "manifestVersion": "1.0",
   "id": "github",
   "organisation": "GitHub",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
   "primitiveFamilies": ["workflows", "connectors", "identity"],
   "implementations": [
     { "family": "workflows", "products": ["Repositories", "Actions", "Checks", "Rulesets", "Pull Requests", "Apps/API"] },
     { "family": "connectors", "products": ["Repositories", "Apps/API"] },
-    { "family": "identity", "products": ["GitHub identities", "Actions OIDC", "Apps/API"] }
+    { "family": "identity", "products": ["Repository collaborators", "Apps/API"] }
   ],
   "operations": [
     "software.change.observe",
