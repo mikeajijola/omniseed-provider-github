@@ -47,7 +47,7 @@ class MutationClient(FakeClient):
 
 
 class MergeClient(FakeClient):
-    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False, legacy_statuses=None, trusted=False):
+    def __init__(self, *, approved=True, checks="success", merged=False, api_failure=False, legacy_statuses=None, trusted=False, mergeable=True, mergeable_state="clean", head_ref="omniseed/test", cleanup_failure=False):
         super().__init__()
         self.approved = approved
         self.check_state = checks
@@ -55,11 +55,15 @@ class MergeClient(FakeClient):
         self.api_failure = api_failure
         self.legacy_statuses = legacy_statuses
         self.trusted = trusted
+        self.mergeable = mergeable
+        self.mergeable_state = mergeable_state
+        self.head_ref = head_ref
+        self.cleanup_failure = cleanup_failure
         self.merge_calls = 0
 
     def api(self, endpoint, method="GET", body=None, allow_failure=False):
         if endpoint.endswith("pulls/7"):
-            return {"number": 7, "html_url": "https://github.com/example/sandbox/pull/7", "state": "closed" if self.merged else "open", "merged": self.merged, "merged_at": "2026-08-15T00:00:00Z" if self.merged else None, "merge_commit_sha": "merge-7" if self.merged else None, "mergeable": True, "mergeable_state": "clean", "head": {"sha": "head-7"}, "base": {"sha": "base-1"}}
+            return {"number": 7, "html_url": "https://github.com/example/sandbox/pull/7", "state": "closed" if self.merged else "open", "merged": self.merged, "merged_at": "2026-08-15T00:00:00Z" if self.merged else None, "merge_commit_sha": "merge-7" if self.merged else None, "mergeable": self.mergeable, "mergeable_state": self.mergeable_state, "head": {"sha": "head-7", "ref": self.head_ref}, "base": {"sha": "base-1"}}
         if endpoint.endswith("pulls/7/reviews"):
             return [{"state": "APPROVED", "user": {"login": "reviewer"}}] if self.approved else []
         if endpoint.endswith("commits/head-7/check-runs"):
@@ -75,6 +79,9 @@ class MergeClient(FakeClient):
             if self.api_failure: raise MODULE.GitHubError("merge failed", {"status": 500})
             self.merged = True
             return {"merged": True, "sha": "merge-7", "message": "Pull Request successfully merged"}
+        if endpoint.endswith("git/refs/heads/omniseed%2Ftest") and method == "DELETE":
+            if self.cleanup_failure: raise MODULE.GitHubError("cleanup failed", {"status": 422})
+            return {}
         return super().api(endpoint, method, body, allow_failure)
 
 
@@ -97,7 +104,7 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         result = provider.initialize({"protocolVersion": MODULE.PROTOCOL, "configuration": config(), "context": {"companyId": "test"}})
         self.assertEqual(result["provider"]["id"], "github")
-        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.7")
+        self.assertEqual(result["provider"]["version"], "0.1.0-alpha.8")
         self.assertEqual(result["primitiveFamilies"], ["workflows", "connectors", "identity"])
         self.assertEqual(result["offerings"][0]["family"], "workflows")
         self.assertEqual(result["operations"], MODULE.OPERATIONS)
@@ -215,7 +222,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(raised.exception.details["code"], "approval_required")
 
     def test_governed_merge_accepts_exact_head_trusted_actions_approval_check(self):
-        client = MergeClient(approved=False, trusted=True)
+        client = MergeClient(approved=False, trusted=True, mergeable_state="blocked")
         policy = {"requireApproval": True, "requirePassingChecks": True, "trustedApprovalChecks": [{"name": "governed-company-change-approval", "appSlug": "github-actions"}]}
         result = MODULE.GitHubProvider({**config(), "mergePolicy": policy}, client).invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
         self.assertEqual(result["trustedApprovals"], ["github-actions:governed-company-change-approval"])
@@ -260,6 +267,25 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["approvedBy"], ["reviewer"])
         self.assertEqual(result["checks"]["state"], "success")
         self.assertEqual(client.merge_calls, 1)
+
+    def test_governed_merge_rejects_conflict_and_invalid_cleanup_before_merge(self):
+        for client, branch, code in [
+            (MergeClient(mergeable=False, mergeable_state="dirty"), None, "merge_conflict"),
+            (MergeClient(), "other/branch", "branch_cleanup_invalid"),
+        ]:
+            with self.subTest(code=code):
+                provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, client)
+                with self.assertRaises(MODULE.GitHubError) as raised:
+                    provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7", "branch": branch}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+                self.assertEqual(raised.exception.details["code"], code)
+                self.assertEqual(client.merge_calls, 0)
+
+    def test_governed_merge_preserves_evidence_when_branch_cleanup_fails(self):
+        client = MergeClient(cleanup_failure=True)
+        provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, client)
+        result = provider.invoke("company.change.merge", {"pullRequestNumber": 7, "expectedHeadSha": "head-7", "branch": "omniseed/test"}, {"actorId": "owner", "permissions": ["company_change.merge"]})
+        self.assertEqual(result["mergeCommitSha"], "merge-7")
+        self.assertEqual(result["branchCleanup"], {"status": "failed", "branch": "omniseed/test", "error": "github_branch_cleanup_failed"})
 
     def test_governed_merge_propagates_api_failure_without_success_evidence(self):
         provider = MODULE.GitHubProvider({**config(), "mergePolicy": {"requireApproval": True, "requirePassingChecks": True}}, MergeClient(api_failure=True))

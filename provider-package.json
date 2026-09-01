@@ -2,7 +2,7 @@
   "manifestVersion": "1.0",
   "id": "github",
   "organisation": "GitHub",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "engineCompatibility": "omniseed.provider.protocol/1.0",
   "primitiveFamilies": ["workflows", "connectors", "identity"],
   "implementations": [
