@@ -24,7 +24,7 @@ export class GitHubProvider {
     this.identity = identity;
     this.status = status ?? { implementation_available: true, configured: true, connected: false, healthy: false };
     this.metadata = {
-      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.7",
+      id: "github", name: "GitHub", organisation: "GitHub", version: "0.1.0-alpha.8",
       families: FAMILIES, operations: OPERATIONS,
       offerings: [
         { family: "workflows", id: "governed_change_process" },
@@ -148,6 +148,8 @@ export class GitHubProvider {
     const pull = await this.#request(`/repos/${repo}/pulls/${number}`);
     if (pull.merged) return { merged: true, alreadyMerged: true, status: "already_merged", mergeCommitSha: pull.merge_commit_sha, mergedAt: pull.merged_at, approvedBy: [], checks: null };
     if (pull.head?.sha !== input.expectedHeadSha) throw new GitHubProviderError("github_merge_head_changed", "Pull request head no longer matches the approved submission", { expected: input.expectedHeadSha, observed: pull.head?.sha });
+    if (pull.mergeable === false || pull.mergeable_state === "dirty") throw new GitHubProviderError("github_merge_conflict", "Pull request is not conflict-free and mergeable", { mergeable: pull.mergeable, mergeableState: pull.mergeable_state });
+    if (input.branch && (input.branch !== pull.head?.ref || !input.branch.startsWith(this.configuration.branchPrefix))) throw new GitHubProviderError("github_branch_cleanup_invalid", "Branch cleanup is limited to the exact scoped pull request head branch");
     const [reviews, checks, combined] = await Promise.all([
       this.#request(`/repos/${repo}/pulls/${number}/reviews`),
       this.#request(`/repos/${repo}/commits/${input.expectedHeadSha}/check-runs`),
@@ -162,7 +164,16 @@ export class GitHubProvider {
     const result = await this.#request(`/repos/${repo}/pulls/${number}/merge`, { method: "PUT", body: { sha: input.expectedHeadSha, merge_method: policy.mergeMethod } });
     if (!result.merged) throw new GitHubProviderError("github_merge_failed", "GitHub did not merge the approved pull request");
     const observed = await this.#request(`/repos/${repo}/pulls/${number}`);
-    return { merged: true, alreadyMerged: false, status: "merged", mergeCommitSha: result.sha, mergedAt: observed.merged_at, approvedBy, trustedApprovals, checks: summary };
+    let branchCleanup = { status: "not_requested" };
+    if (input.branch) {
+      try {
+        await this.#request(`/repos/${repo}/git/refs/heads/${encodeURIComponent(input.branch)}`, { method: "DELETE" });
+        branchCleanup = { status: "deleted", branch: input.branch };
+      } catch (error) {
+        branchCleanup = { status: "failed", branch: input.branch, error: error instanceof GitHubProviderError ? error.code : "github_branch_cleanup_failed" };
+      }
+    }
+    return { merged: true, alreadyMerged: false, status: "merged", mergeCommitSha: result.sha, mergedAt: observed.merged_at, approvedBy, trustedApprovals, checks: summary, branchCleanup };
   }
 
   async #observeRepository({ branch = null, commitSha = null, pullRequestNumber = null } = {}) {

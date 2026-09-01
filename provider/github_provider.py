@@ -21,7 +21,7 @@ OPERATIONS = [
     "identity.subject.inspect", "company.change.merge"
 ]
 FAMILIES = ["workflows", "connectors", "identity"]
-VERSION = "0.1.0-alpha.7"
+VERSION = "0.1.0-alpha.8"
 IDENTITY_KIND = "repository_collaborator"
 IDENTITY_OFFERS = {"contributor_identity"}
 SECRET_FIELD_PARTS = ("token", "secret", "password", "credential", "authorization")
@@ -415,6 +415,12 @@ class GitHubProvider:
             raise GitHubError("Pull request head changed after approval", {"code": "external_drift", "expectedHeadSha": expected_head, "actualHeadSha": pull["head"]["sha"]})
         if pull.get("merged"):
             return {"merged": True, "alreadyMerged": True, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": pull.get("merge_commit_sha"), "mergedAt": pull.get("merged_at")}
+        if pull.get("mergeable") is False or pull.get("mergeable_state") == "dirty":
+            raise GitHubError("Pull request is not conflict-free and mergeable", {"code": "merge_conflict", "mergeable": pull.get("mergeable"), "mergeableState": pull.get("mergeable_state")})
+        branch = attributes.get("branch")
+        branch_prefix = self.configuration.get("branchPrefix", "omniseed/")
+        if branch and (branch != pull.get("head", {}).get("ref") or not branch.startswith(branch_prefix)):
+            raise GitHubError("Branch cleanup is limited to the exact scoped pull request head branch", {"code": "branch_cleanup_invalid"})
         policy = self.configuration.get("mergePolicy") or {}
         reviews = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/reviews")
         approved_by = sorted({review["user"]["login"] for review in reviews if review.get("state") == "APPROVED" and review.get("user", {}).get("login")})
@@ -441,7 +447,14 @@ class GitHubProvider:
         result = self.client.api(f"repos/{self.repository}/pulls/{pull_number}/merge", "PUT", {"sha": expected_head, "merge_method": policy.get("mergeMethod", "squash")})
         if not result.get("merged"):
             raise GitHubError("GitHub did not merge the pull request", {"code": "merge_rejected", "message": result.get("message")})
-        return {"merged": True, "alreadyMerged": False, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": result.get("sha"), "mergedAt": now(), "approvedBy": approved_by, "trustedApprovals": trusted_approvals, "checks": check_evidence, "mergedBy": actor.get("actorId")}
+        branch_cleanup = {"status": "not_requested"}
+        if branch:
+            try:
+                self.client.api(f"repos/{self.repository}/git/refs/heads/{urllib.parse.quote(branch, safe='')}", "DELETE")
+                branch_cleanup = {"status": "deleted", "branch": branch}
+            except GitHubError:
+                branch_cleanup = {"status": "failed", "branch": branch, "error": "github_branch_cleanup_failed"}
+        return {"merged": True, "alreadyMerged": False, "pullRequestNumber": pull_number, "pullRequestUrl": pull["html_url"], "mergeCommitSha": result.get("sha"), "mergedAt": now(), "approvedBy": approved_by, "trustedApprovals": trusted_approvals, "checks": check_evidence, "mergedBy": actor.get("actorId"), "branchCleanup": branch_cleanup}
 
 
 def respond(request_id, result=None, error=None):

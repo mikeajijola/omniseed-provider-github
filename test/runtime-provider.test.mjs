@@ -126,6 +126,45 @@ test("governed merge binds exact head, approval, and passing check", async () =>
   assert.equal(JSON.parse(calls.find(call => call.path.endsWith("/merge")).init.body).sha, sha("b"));
 });
 
+test("governed merge rejects conflicts and deletes only the exact scoped agent branch", async () => {
+  const commonChecks = { check_runs: [{ name: "checks", status: "completed", conclusion: "success" }] };
+  const conflict = await connected({
+    "GET /repos/example/company/pulls/11": { number: 11, merged: false, mergeable: false, mergeable_state: "dirty", head: { sha: sha("b"), ref: "omniseed/conflict" } },
+  });
+  await assert.rejects(conflict.provider.invoke("company.change.merge", { pullRequestNumber: 11, expectedHeadSha: sha("b") }, { permissions: ["company_change.merge"] }), error => error.code === "github_merge_conflict");
+  let pulls = 0;
+  const clean = await connected({
+    "GET /repos/example/company/pulls/12": () => (++pulls === 1 ? { number: 12, merged: false, mergeable: true, mergeable_state: "clean", head: { sha: sha("b"), ref: "omniseed/safe" } } : { number: 12, merged: true, merged_at: "2026-09-01T00:00:00Z" }),
+    "GET /repos/example/company/pulls/12/reviews": [{ state: "APPROVED", user: { login: "reviewer" } }],
+    [`GET /repos/example/company/commits/${sha("b")}/check-runs`]: commonChecks,
+    [`GET /repos/example/company/commits/${sha("b")}/status`]: { state: "success", statuses: [] },
+    "PUT /repos/example/company/pulls/12/merge": { merged: true, sha: sha("m") },
+    "DELETE /repos/example/company/git/refs/heads/omniseed%2Fsafe": {},
+  });
+  const result = await clean.provider.invoke("company.change.merge", { pullRequestNumber: 12, expectedHeadSha: sha("b"), branch: "omniseed/safe" }, { permissions: ["company_change.merge"] });
+  assert.deepEqual(result.branchCleanup, { status: "deleted", branch: "omniseed/safe" });
+});
+
+test("governed merge validates cleanup before merging and preserves evidence when deletion fails", async () => {
+  const checks = { check_runs: [{ name: "checks", status: "completed", conclusion: "success" }] };
+  const routes = {
+    "GET /repos/example/company/pulls/13": { number: 13, merged: false, mergeable: true, mergeable_state: "clean", head: { sha: sha("b"), ref: "omniseed/safe" } },
+    "GET /repos/example/company/pulls/13/reviews": [{ state: "APPROVED", user: { login: "reviewer" } }],
+    [`GET /repos/example/company/commits/${sha("b")}/check-runs`]: checks,
+    [`GET /repos/example/company/commits/${sha("b")}/status`]: { state: "success", statuses: [] },
+    "PUT /repos/example/company/pulls/13/merge": { merged: true, sha: sha("m") },
+  };
+  const invalid = await connected(routes);
+  await assert.rejects(invalid.provider.invoke("company.change.merge", { pullRequestNumber: 13, expectedHeadSha: sha("b"), branch: "other/branch" }, { permissions: ["company_change.merge"] }), error => error.code === "github_branch_cleanup_invalid");
+  assert.equal(invalid.calls.some(call => call.path.endsWith("/merge")), false);
+
+  let pulls = 0;
+  const cleanupFailure = await connected({ ...routes, "GET /repos/example/company/pulls/13": () => (++pulls === 1 ? routes["GET /repos/example/company/pulls/13"] : { merged: true, merged_at: "2026-09-01T00:00:00Z" }) });
+  const result = await cleanupFailure.provider.invoke("company.change.merge", { pullRequestNumber: 13, expectedHeadSha: sha("b"), branch: "omniseed/safe" }, { permissions: ["company_change.merge"] });
+  assert.equal(result.mergeCommitSha, sha("m"));
+  assert.deepEqual(result.branchCleanup, { status: "failed", branch: "omniseed/safe", error: "github_api_failed" });
+});
+
 test("governed merge returns complete idempotent evidence for an already-merged exact head", async () => {
   const routes = { "GET /repos/example/company/pulls/9": { number: 9, merged: true, merged_at: "2026-08-25T09:39:09Z", merge_commit_sha: sha("m"), head: { sha: sha("b") } } };
   const { provider, calls } = await connected(routes);
@@ -153,7 +192,7 @@ test("governed merge accepts successful and skipped check runs when no legacy st
 test("governed merge accepts only the configured successful GitHub Actions approval check", async () => {
   let pulls = 0;
   const routes = {
-    "GET /repos/example/company/pulls/6": () => (++pulls === 1 ? { number: 6, merged: false, head: { sha: sha("b") } } : { number: 6, merged: true, merged_at: "2026-08-24T12:00:00Z" }),
+    "GET /repos/example/company/pulls/6": () => (++pulls === 1 ? { number: 6, merged: false, mergeable: true, mergeable_state: "blocked", head: { sha: sha("b") } } : { number: 6, merged: true, merged_at: "2026-08-24T12:00:00Z" }),
     "GET /repos/example/company/pulls/6/reviews": [],
     [`GET /repos/example/company/commits/${sha("b")}/check-runs`]: { check_runs: [{ name: "governed-company-change-approval", app: { slug: "github-actions" }, status: "completed", conclusion: "success", html_url: "https://checks/approval" }] },
     [`GET /repos/example/company/commits/${sha("b")}/status`]: { state: "success", statuses: [] },
