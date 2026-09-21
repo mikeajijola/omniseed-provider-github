@@ -20,8 +20,8 @@
     "company.change.merge"
   ],
   "configurationSchema": "./provider-configuration.schema.json",
-  "observationTypes": ["software_change_state", "github_repository_state", "github_identity_state"],
-  "evidenceTypes": ["software_change_state", "github_repository_observation", "github_identity_observation"],
+  "observationTypes": ["software_change_state", "github_repository_state", "github_workflow_state", "github_identity_state"],
+  "evidenceTypes": ["software_change_state", "github_repository_observation", "github_workflow_observation", "github_identity_observation"],
   "permissions": [
     "github.repository.read",
     "github.contents.write",
