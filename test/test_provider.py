@@ -126,6 +126,33 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(observed["evidence"][0]["subjectId"], 42)
         self.assertNotIn("email", observed["evidence"][0])
 
+    def test_declarative_workflows_bind_without_company_change_mutation_fields(self):
+        provider = MODULE.GitHubProvider(config(), FakeClient())
+        resources = [
+            ("company_change_workflow", ["governed_change_process"]),
+            ("github_change_workflow", ["software_change_manage"]),
+            ("github_conformance_workflow", ["conformance_workflow"]),
+            ("ecosystem_reconciliation_workflow", ["approved_desired_state_resolution", "deterministic_reconciliation"]),
+            ("product_release_workflow", ["verified_release_process"]),
+            ("stewardship_scheduler", [])
+        ]
+        for resource_id, offers in resources:
+            action = {"family": "workflows", "resourceId": resource_id, "desired": {"offers": offers, "spec": {"repository": "example/sandbox", "baseBranch": "main"}}}
+            self.assertTrue(provider.validate(action)["valid"])
+            applied = provider.apply(action)
+            self.assertEqual(applied["status"], "bound")
+            self.assertEqual(applied["attributes"]["family"], "workflows")
+            observed = provider.observe(applied)
+            self.assertEqual(observed["status"], "healthy")
+            self.assertEqual(observed["evidence"][0]["type"], "github_workflow_observation")
+
+    def test_actual_company_change_still_requires_exact_mutation_fields(self):
+        provider = MODULE.GitHubProvider(config(), FakeClient())
+        action = {"family": "workflows", "resourceId": "github_company_change", "desired": {"offers": ["governed_change_process"], "spec": {}}}
+        result = provider.validate(action)
+        self.assertFalse(result["valid"])
+        self.assertIn("expectedBaseSha", {issue.get("field") for issue in result["issues"]})
+
     def test_github_does_not_claim_steward_identity(self):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         action = {"id": "identity-1", "family": "identity", "resourceId": "lily_identity", "desired": {"offers": ["steward_identity"]}}

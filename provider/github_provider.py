@@ -24,6 +24,12 @@ FAMILIES = ["workflows", "connectors", "identity"]
 VERSION = "0.1.0-alpha.8"
 IDENTITY_KIND = "repository_collaborator"
 IDENTITY_OFFERS = {"contributor_identity"}
+WORKFLOW_OFFERS = {
+    "software_change_manage", "governed_change_process", "conformance_workflow",
+    "approved_desired_state_resolution", "deterministic_reconciliation",
+    "verified_release_process"
+}
+CHANGE_ACTION_RESOURCES = {"github_software_change", "github_company_change"}
 SECRET_FIELD_PARTS = ("token", "secret", "password", "credential", "authorization")
 
 
@@ -173,14 +179,16 @@ class GitHubProvider:
 
     def validate(self, action):
         family = action.get("family")
-        if family in ["connectors", "identity"]:
+        declarative_workflow = family == "workflows" and action.get("resourceId") not in CHANGE_ACTION_RESOURCES
+        if family in ["connectors", "identity"] or declarative_workflow:
             issues = []
             if not action.get("resourceId"):
                 issues.append({"code": "missing_field", "field": "resourceId", "message": "resourceId is required"})
             desired = action.get("desired") or {}
             supported = {
                 "connectors": {"repository_access", "public_repository_access"},
-                "identity": IDENTITY_OFFERS
+                "identity": IDENTITY_OFFERS,
+                "workflows": WORKFLOW_OFFERS
             }
             unsupported = sorted(set(desired.get("offers") or []) - supported[family])
             if unsupported:
@@ -196,6 +204,12 @@ class GitHubProvider:
                     issues.append({"code": "missing_field", "field": "spec.login", "message": "spec.login is required"})
                 if spec.get("repository") != self.repository:
                     issues.append({"code": "repository_scope_mismatch", "message": "Identity repository must match Provider configuration"})
+            if declarative_workflow:
+                spec = desired.get("spec") or {}
+                if spec.get("repository") and spec["repository"] != self.repository:
+                    issues.append({"code": "repository_scope_mismatch", "message": "Workflow repository must match Provider configuration"})
+                if spec.get("baseBranch") and spec["baseBranch"] != self.base_branch:
+                    issues.append({"code": "repository_scope_mismatch", "message": "Workflow base branch must match Provider configuration"})
             return {"valid": not issues, "issues": issues}
         issues = []
         spec = ((action or {}).get("desired") or {}).get("spec") or {}
@@ -234,7 +248,8 @@ class GitHubProvider:
         validation = self.validate(action)
         if not validation["valid"]:
             raise GitHubError("Action is no longer valid", {"issues": validation["issues"]})
-        if action.get("family") in ["connectors", "identity"]:
+        declarative_workflow = action.get("family") == "workflows" and action.get("resourceId") not in CHANGE_ACTION_RESOURCES
+        if action.get("family") in ["connectors", "identity"] or declarative_workflow:
             family = action["family"]
             attributes = {
                 "family": family,
@@ -322,10 +337,11 @@ class GitHubProvider:
 
     def observe(self, resource):
         attributes = resource.get("attributes") or {}
-        if attributes.get("family") == "connectors":
+        if attributes.get("family") in ["connectors", "workflows"]:
             snapshot = self.observe_repository()
             checked = snapshot["observedAt"]
-            evidence = {"type": "github_repository_observation", "source": "github", "repository": snapshot["repository"], "baseBranch": snapshot["baseBranch"], "baseSha": snapshot["baseSha"], "reachable": True, "observedAt": checked}
+            evidence_type = "github_workflow_observation" if attributes.get("family") == "workflows" else "github_repository_observation"
+            evidence = {"type": evidence_type, "source": "github", "resourceId": attributes.get("resourceId"), "repository": snapshot["repository"], "baseBranch": snapshot["baseBranch"], "baseSha": snapshot["baseSha"], "reachable": True, "observedAt": checked}
             return {"status": "healthy", "checkedAt": checked, "providerResourceId": resource.get("providerResourceId"), "evidence": [evidence], "snapshot": snapshot}
         if attributes.get("family") == "identity":
             evidence = self.observe_identity(attributes)
