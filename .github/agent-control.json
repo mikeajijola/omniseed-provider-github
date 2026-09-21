@@ -1,0 +1,1 @@
+{"schemaVersion":1,"repository":"mikeajijola/omniseed-provider-github","controlPlane":"mikeajijola/agent-control","controlRevision":"590cd339679e0afdfdac4a6f5c940b157920b7c4","workflow":".github/workflows/repository-lifecycle.yml","evidence":"job-log-and-summary","authority":"contents:read"}

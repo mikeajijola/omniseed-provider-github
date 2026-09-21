@@ -1,0 +1,34 @@
+name: Repository lifecycle
+on:
+  workflow_dispatch:
+    inputs:
+      task_digest: {description: Immutable task digest, required: true, type: string}
+      source_issue: {description: Exact Agent Control source issue, required: true, type: string}
+      control_revision: {description: Immutable Agent Control revision, required: true, type: string}
+permissions:
+  contents: read
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24, cache: npm}
+      - run: npm test
+      - name: Validate provenance and record evidence
+        env:
+          TASK_DIGEST: ${{ inputs.task_digest }}
+          SOURCE_ISSUE: ${{ inputs.source_issue }}
+          CONTROL_REVISION: ${{ inputs.control_revision }}
+          OBSERVED_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'),c=JSON.parse(fs.readFileSync('.github/agent-control.json','utf8'));
+          if(!/^[a-f0-9]{64}$/.test(process.env.TASK_DIGEST||''))throw Error('Invalid task digest');
+          if(process.env.CONTROL_REVISION!==c.controlRevision)throw Error('Unrecognized control revision');
+          if(!/^https:\/\/github\.com\/mikeajijola\/agent-control\/issues\/[1-9][0-9]*$/.test(process.env.SOURCE_ISSUE||''))throw Error('Invalid source issue');
+          const e={schemaVersion:1,repository:process.env.GITHUB_REPOSITORY,visibility:'public',observedSha:process.env.OBSERVED_SHA,taskDigest:process.env.TASK_DIGEST,sourceIssue:process.env.SOURCE_ISSUE,controlRevision:process.env.CONTROL_REVISION,authority:'contents:read',verification:'passed',runUrl:process.env.RUN_URL};
+          console.log(`AGENT_CONTROL_EVIDENCE=${JSON.stringify(e)}`);fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Repository lifecycle passed\n\n- Revision: \`${e.observedSha}\`\n- Control: \`${e.controlRevision}\`\n- Authority: \`${e.authority}\`\n`);
+          NODE
