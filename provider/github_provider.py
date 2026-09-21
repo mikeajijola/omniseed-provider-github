@@ -148,11 +148,17 @@ class GitHubProvider:
         identity = None
         if configured:
             try:
-                identity = self.client.authenticated_user()
                 connected = self.client.api("repos/" + self.repository) is not None
                 healthy = connected and self.base_sha() is not None
             except (GitHubError, KeyError):
                 pass
+            if connected:
+                try:
+                    identity = self.client.authenticated_user()
+                except (GitHubError, KeyError):
+                    # GitHub Actions installation tokens can access their scoped
+                    # repository while the user endpoint is unavailable.
+                    identity = None
         return {
             "implementation_available": True,
             "configured": configured,

@@ -175,6 +175,20 @@ class ProviderTests(unittest.TestCase):
         provider = MODULE.GitHubProvider({}, FakeClient())
         self.assertEqual(provider.status(), {"implementation_available": True, "configured": False, "connected": False, "healthy": False, "identity": None})
 
+    def test_status_accepts_repository_scoped_installation_token_without_user_endpoint(self):
+        class InstallationClient(FakeClient):
+            def authenticated_user(self):
+                raise MODULE.GitHubError("Resource not accessible by integration", {"status": 403})
+
+        provider = MODULE.GitHubProvider(config(), InstallationClient())
+        self.assertEqual(provider.status(), {
+            "implementation_available": True,
+            "configured": True,
+            "connected": True,
+            "healthy": True,
+            "identity": None
+        })
+
     def test_validation_rejects_repository_branch_and_path_escape(self):
         provider = MODULE.GitHubProvider(config(), FakeClient())
         spec = {**change_spec(), "repository": "example/other", "branch": "outside/test", "path": "../secret"}
